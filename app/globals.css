@@ -1,0 +1,316 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Print Styles for Daily Schedule */
+@media print {
+  @page {
+    size: A4;
+    margin: 0.5in;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body {
+    font-size: 12px;
+    line-height: 1.4;
+    color: #000 !important;
+    background: white !important;
+  }
+
+  /* Hide non-essential elements during print */
+  .print\\:hidden {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print\\:block {
+    display: block !important;
+  }
+
+  /* Ensure proper page breaks */
+  .break-inside-avoid {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .break-before-page {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .break-after-page {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  /* Print-specific layout adjustments */
+  .print-container {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Ensure headers and important content are visible */
+  h1, h2, h3, h4, h5, h6 {
+    color: #000 !important;
+    page-break-after: avoid;
+    break-after: avoid-page;
+  }
+
+  /* Table and grid improvements for print */
+  .grid {
+    display: block !important;
+  }
+
+  .grid > div {
+    display: block !important;
+    margin-bottom: 1rem;
+  }
+
+  /* Booking cards for print */
+  .booking-card {
+    border: 1px solid #ddd !important;
+    margin-bottom: 0.5rem;
+    padding: 0.5rem;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Property sections */
+  .property-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Contact info visibility */
+  .contact-info {
+    font-size: 10px !important;
+    color: #555 !important;
+  }
+
+  /* Notes styling */
+  .booking-notes {
+    font-size: 9px !important;
+    color: #666 !important;
+    font-style: italic;
+  }
+
+  /* Status badges */
+  .status-badge {
+    border: 1px solid #ccc !important;
+    background: #f8f9fa !important;
+    color: #000 !important;
+    font-weight: bold !important;
+  }
+
+  /* Time stamps */
+  .timestamp {
+    font-weight: bold !important;
+    color: #000 !important;
+  }
+
+  /* Icons - replace with text for print */
+  .lucide {
+    display: none !important;
+  }
+
+  .lucide + span::before {
+    content: "• ";
+    font-weight: bold;
+  }
+
+  /* Ensure proper spacing */
+  .space-y-3 > * + * {
+    margin-top: 0.5rem !important;
+  }
+
+  .space-y-6 > * + * {
+    margin-top: 1rem !important;
+  }
+
+  .space-y-8 > * + * {
+    margin-top: 1.5rem !important;
+  }
+
+  /* Button and interactive elements */
+  button, input, select {
+    display: none !important;
+  }
+
+  /* Print header styling */
+  .print-header {
+    text-align: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #000;
+  }
+
+  .print-header h1 {
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+  }
+
+  .print-header p {
+    font-size: 14px;
+    color: #555;
+  }
+
+  /* Print footer styling */
+  .print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 10px;
+    color: #888;
+    padding: 1rem;
+    border-top: 1px solid #ddd;
+  }
+
+  /* Property headers */
+  .property-header {
+    font-size: 16px !important;
+    font-weight: bold !important;
+    margin-bottom: 1rem !important;
+    padding-bottom: 0.5rem !important;
+    border-bottom: 1px solid #ccc !important;
+  }
+
+  /* Activity sections */
+  .activity-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .activity-header {
+    font-size: 14px !important;
+    font-weight: bold !important;
+    margin-bottom: 0.75rem !important;
+  }
+
+  /* Guest entries */
+  .guest-entry {
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+    border-left: 3px solid #ddd;
+  }
+
+  .guest-name {
+    font-size: 12px !important;
+    font-weight: bold !important;
+  }
+
+  .guest-details {
+    font-size: 10px !important;
+    color: #555 !important;
+    margin-top: 0.25rem;
+  }
+
+  /* Color coding for check-ins and check-outs */
+  .checkin-section {
+    border-left-color: #10b981 !important; /* Green */
+  }
+
+  .checkout-section {
+    border-left-color: #ef4444 !important; /* Red */
+  }
+
+  .checkin-header {
+    color: #047857 !important;
+  }
+
+  .checkout-header {
+    color: #dc2626 !important;
+  }
+
+  /* Summary stats */
+  .summary-stats {
+    background: #f9fafb !important;
+    border: 1px solid #d1d5db !important;
+    padding: 1rem !important;
+    margin-bottom: 1.5rem !important;
+    text-align: center !important;
+  }
+
+  /* Ensure text is not cut off */
+  .text-wrap {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  /* Remove shadows and rounded corners for print */
+  .rounded-lg,
+  .rounded {
+    border-radius: 0 !important;
+  }
+
+  .shadow,
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg {
+    box-shadow: none !important;
+  }
+
+  /* Ensure sufficient contrast */
+  .text-gray-500,
+  .text-gray-400,
+  .text-gray-600 {
+    color: #374151 !important;
+  }
+
+  .bg-gray-50,
+  .bg-gray-100 {
+    background-color: #f9fafb !important;
+    border: 1px solid #e5e7eb !important;
+  }
+
+  /* Platform badges */
+  .platform-badge {
+    display: inline !important;
+    font-size: 9px !important;
+    text-transform: uppercase !important;
+    font-weight: bold !important;
+    color: #000 !important;
+  }
+
+  .platform-badge::before {
+    content: "[";
+  }
+
+  .platform-badge::after {
+    content: "]";
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+  }
+  
+  .input-field {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+  }
+}
