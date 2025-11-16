@@ -17,13 +17,21 @@ function ResetPasswordContent() {
   const [updateSuccess, setUpdateSuccess] = useState('')
 
   useEffect(() => {
+    let mounted = true
+    let timeoutCleared = false
+
     const validateResetLink = async () => {
       const supabase = createClient()
       if (!supabase) {
-        setValidationError('Auth backend unavailable')
-        setIsValidating(false)
+        if (mounted) {
+          setValidationError('Auth backend unavailable')
+          setIsValidating(false)
+        }
         return
       }
+      
+      // Prevent duplicate execution
+      if (!mounted) return
 
       // Helper to parse hash params
       const getHashParams = (): URLSearchParams | null => {
@@ -48,10 +56,17 @@ function ResetPasswordContent() {
 
       // Add timeout to prevent hanging
       const timeoutId = setTimeout(() => {
-        console.error('Password reset validation timed out')
-        setValidationError('Reset link validation timed out. Please try requesting a new password reset.')
-        setIsValidating(false)
+        if (mounted && !timeoutCleared) {
+          console.error('Password reset validation timed out')
+          setValidationError('Reset link validation timed out. Please try requesting a new password reset.')
+          setIsValidating(false)
+        }
       }, 20000) // 20 second timeout
+      
+      const clearTimeoutSafe = () => {
+        timeoutCleared = true
+        clearTimeout(timeoutId)
+      }
       
       try {
         // Check immediately first (before any delay)
@@ -139,7 +154,7 @@ function ResetPasswordContent() {
             }, 3000)
           })
           
-          const sessionResult = await Promise.race([sessionPromise, sessionTimeout])
+            const sessionResult = await Promise.race([sessionPromise, sessionTimeout])
           session = sessionResult.data?.session
           sessionError = sessionResult.error
           console.log('🔍 Session check result:', {
@@ -154,8 +169,10 @@ function ResetPasswordContent() {
         
         if (session && !sessionError) {
           console.log('✅ Session already exists, validation successful')
-          clearTimeout(timeoutId)
-          setIsValidating(false)
+          clearTimeoutSafe()
+          if (mounted) {
+            setIsValidating(false)
+          }
           return
         }
 
@@ -202,7 +219,9 @@ function ResetPasswordContent() {
               hasError: !!result.error,
               resultType: typeof result
             })
-            clearTimeout(timeoutId)
+            clearTimeoutSafe()
+            
+            if (!mounted) return
             
             if (result.error) {
               console.error('❌ PKCE exchange error:', result.error)
@@ -220,24 +239,10 @@ function ResetPasswordContent() {
                 sessionKeys: result.data.session ? Object.keys(result.data.session) : null
               })
               
-              // Check if we got a session
-              const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-              if (session) {
-                console.log('✅ Session confirmed after exchange - validation successful')
-                setIsValidating(false)
-                return
-              } else if (sessionError) {
-                console.warn('⚠️ Session check error:', sessionError)
-                // Still allow password reset - sometimes the session is created but not immediately available
-                console.log('⚠️ Allowing password reset despite session check error')
-                setIsValidating(false)
-                return
-              } else {
-                console.warn('⚠️ Exchange succeeded but no session found - allowing password reset anyway')
-                // Still allow password reset - sometimes the session is created but not immediately available
-                setIsValidating(false)
-                return
-              }
+              // Password reset link is valid, allow user to set new password
+              console.log('✅ Validation successful - allowing password reset')
+              setIsValidating(false)
+              return
             }
             
             // If we get here, something unexpected happened
@@ -246,7 +251,8 @@ function ResetPasswordContent() {
             setValidationError('Unexpected response from authentication server')
             setIsValidating(false)
           } catch (err: any) {
-            clearTimeout(timeoutId)
+            clearTimeoutSafe()
+            if (!mounted) return
             console.error('❌ PKCE exchange exception:', err)
             console.error('Exception details:', err?.stack || err)
             console.error('Exception message:', err?.message)
@@ -405,6 +411,12 @@ function ResetPasswordContent() {
     }
     
     validateResetLink()
+    
+    // Cleanup function
+    return () => {
+      mounted = false
+      timeoutCleared = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
