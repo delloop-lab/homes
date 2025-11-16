@@ -109,27 +109,39 @@ export class AuthService {
   }
 
   async resetPassword(email: string) {
-    console.log('[Password Reset] Starting password reset for:', email)
+    console.log('========================================')
+    console.log('🔑 RESET PASSWORD FUNCTION CALLED')
+    console.log('Email:', email)
+    console.log('========================================')
     
     if (!this.supabase) {
-      console.error('[Password Reset] Supabase client not available')
+      console.error('❌ CRITICAL: Supabase client not available!')
       throw new Error('Supabase client not available')
     }
+    console.log('✅ Supabase client is available')
 
     const redirectUrl = `${window.location.origin}/auth/reset-password`
-    console.log('[Password Reset] Redirect URL:', redirectUrl)
-    console.log('[Password Reset] Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL)
+    console.log('📍 Redirect URL:', redirectUrl)
+    console.log('📍 Current origin:', window.location.origin)
+    console.log('📍 Supabase URL env:', process.env.NEXT_PUBLIC_SUPABASE_URL)
+    console.log('📍 Supabase client type:', typeof this.supabase)
+    console.log('📍 Supabase client keys:', Object.keys(this.supabase || {}))
 
+    console.log('📤 Calling Supabase resetPasswordForEmail...')
     const { data, error } = await this.supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl
     })
 
     if (error) {
-      console.error('[Password Reset] Error:', error)
+      console.error('❌ SUPABASE ERROR:', error)
+      console.error('❌ Error code:', error.status)
+      console.error('❌ Error message:', error.message)
       throw error
     }
 
-    console.log('[Password Reset] Success! Email sent. Response:', data)
+    console.log('✅✅✅ SUCCESS! Email sent by Supabase!')
+    console.log('✅ Response data:', data)
+    console.log('========================================')
   }
 
   async updatePassword(newPassword: string) {

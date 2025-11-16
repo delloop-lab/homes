@@ -21,16 +21,26 @@ export function ForgotPasswordForm({ onBack }: ForgotPasswordFormProps) {
     setError('')
     setIsLoading(true)
 
-    console.log('[Forgot Password Form] Submitting password reset request for:', email)
+    // Very visible logging
+    console.log('========================================')
+    console.log('🔐 FORGOT PASSWORD FORM SUBMITTED')
+    console.log('Email:', email)
+    console.log('Time:', new Date().toISOString())
+    console.log('========================================')
 
     try {
+      console.log('📧 Calling resetPassword function...')
       await resetPassword(email)
-      console.log('[Forgot Password Form] Password reset request successful')
+      console.log('✅ Password reset request successful!')
+      console.log('✅ Setting success state to true')
       setSuccess(true)
     } catch (err: any) {
-      console.error('[Forgot Password Form] Password reset error:', err)
+      console.error('❌ Password reset error:', err)
+      console.error('❌ Error message:', err.message)
+      console.error('❌ Full error:', JSON.stringify(err, null, 2))
       setError(err.message || 'Failed to send reset email')
     } finally {
+      console.log('🏁 Form submission complete, setting loading to false')
       setIsLoading(false)
     }
   }
