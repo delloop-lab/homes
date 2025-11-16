@@ -20,12 +20,13 @@ export interface UserProfile {
   hourly_rate?: number
   preferred_properties?: string[]
   availability?: any
+  currency?: string
   created_at: string
   updated_at: string
   last_sign_in?: string
 }
 
-export interface AuthUser extends User {
+export interface AuthUser extends Omit<User, 'user_metadata'> {
   user_metadata?: {
     role?: UserRole
     full_name?: string
@@ -69,12 +70,18 @@ export class AuthService {
       throw new Error('Supabase client not available')
     }
 
+    console.log('Attempting sign in for:', email)
     const { data, error } = await this.supabase.auth.signInWithPassword({
       email,
       password
     })
 
-    if (error) throw error
+    if (error) {
+      console.error('Supabase sign in error:', error)
+      throw error
+    }
+    
+    console.log('Sign in successful')
     return data
   }
 
@@ -142,10 +149,20 @@ export class AuthService {
       throw new Error('Supabase client not available')
     }
 
+    let targetUserId = userId
+    if (!targetUserId) {
+      const { data: { user } } = await this.supabase.auth.getUser()
+      targetUserId = user?.id
+    }
+
+    if (!targetUserId) {
+      return null
+    }
+
     const { data, error } = await this.supabase
       .from('user_profiles')
       .select('*')
-      .eq('id', userId || this.supabase.auth.getUser()?.data.user?.id)
+      .eq('id', targetUserId)
       .single()
 
     if (error) {
@@ -260,7 +277,12 @@ export class AuthService {
       return []
     }
 
-    return data?.map(assignment => assignment.user_profiles).filter(Boolean) || []
+    return (data?.map(assignment => {
+      const profile = Array.isArray(assignment.user_profiles) 
+        ? assignment.user_profiles[0] 
+        : assignment.user_profiles
+      return profile
+    }).filter(Boolean) || []) as UserProfile[]
   }
 
   async getCleanerProperties(cleanerId?: string): Promise<string[]> {
@@ -289,7 +311,7 @@ export class AuthService {
     return data?.map(assignment => assignment.property_id) || []
   }
 
-  getUserRole(user: User | null): UserRole | null {
+  getUserRole(user: User | AuthUser | null): UserRole | null {
     if (!user) return null
     return user.user_metadata?.role || 'cleaner'
   }

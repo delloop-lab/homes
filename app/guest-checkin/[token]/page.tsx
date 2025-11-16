@@ -158,7 +158,11 @@ export default function GuestCheckinPage({ params }: GuestCheckinPageProps) {
   const copyToClipboard = async (text: string, item: string) => {
     try {
       await navigator.clipboard.writeText(text)
-      setCopiedItems(prev => new Set([...prev, item]))
+      setCopiedItems(prev => {
+        const newSet = new Set(prev)
+        newSet.add(item)
+        return newSet
+      })
       setTimeout(() => {
         setCopiedItems(prev => {
           const newSet = new Set(prev)

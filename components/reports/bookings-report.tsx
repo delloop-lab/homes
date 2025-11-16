@@ -1,10 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useBookings } from '@/hooks/use-bookings'
 import { BookingWithProperty } from '@/lib/bookings'
-import { format, addMonths, startOfMonth, endOfMonth, parseISO, isWithinInterval } from 'date-fns'
+import { format, addMonths, addDays, parseISO, isWithinInterval } from 'date-fns'
 import { Calendar, Download, Printer } from 'lucide-react'
+import { propertiesService } from '@/lib/properties'
+import { formatPlatformName } from '@/lib/booking-platforms'
+import { emailToLink } from '@/lib/email-utils'
 
 interface BookingsReportProps {
   startDate?: Date
@@ -12,15 +15,26 @@ interface BookingsReportProps {
 
 export function BookingsReport({ startDate }: BookingsReportProps) {
   const [reportStartDate, setReportStartDate] = useState<Date>(startDate || new Date())
-  
-  // Calculate date range: 3 months from start date
-  const reportEndDate = addMonths(reportStartDate, 3)
-  const monthStart = startOfMonth(reportStartDate)
-  const monthEnd = endOfMonth(reportEndDate)
+  const [preset, setPreset] = useState<'30d' | '3m' | 'custom'>('3m')
+  const [customEndDate, setCustomEndDate] = useState<Date>(addMonths((startDate || new Date()), 1))
+  const [propertyId, setPropertyId] = useState<string>('')
+  const [properties, setProperties] = useState<Array<{ id: string; name: string }>>([])
+  const [loadingProperties, setLoadingProperties] = useState<boolean>(false)
+
+  // Calculate date range from preset
+  const reportEndDate = preset === '30d'
+    ? addDays(reportStartDate, 30)
+    : preset === '3m'
+      ? addMonths(reportStartDate, 3)
+      : customEndDate
+
+  const rangeStart = reportStartDate
+  const rangeEnd = reportEndDate
 
   const { bookings, loading, error } = useBookings({
-    date_from: monthStart,
-    date_to: monthEnd,
+    property_id: propertyId || undefined,
+    date_from: rangeStart,
+    date_to: rangeEnd,
     limit: 500 // Get all bookings for the period
   })
 
@@ -32,9 +46,9 @@ export function BookingsReport({ startDate }: BookingsReportProps) {
     const checkOut = parseISO(b.check_out)
     // Include if check-in or check-out is within the period, or if booking spans the period
     return (
-      isWithinInterval(checkIn, { start: monthStart, end: monthEnd }) ||
-      isWithinInterval(checkOut, { start: monthStart, end: monthEnd }) ||
-      (checkIn <= monthStart && checkOut >= monthEnd)
+      isWithinInterval(checkIn, { start: rangeStart, end: rangeEnd }) ||
+      isWithinInterval(checkOut, { start: rangeStart, end: rangeEnd }) ||
+      (checkIn <= rangeStart && checkOut >= rangeEnd)
     )
   })
 
@@ -95,6 +109,43 @@ export function BookingsReport({ startDate }: BookingsReportProps) {
     URL.revokeObjectURL(url)
   }
 
+  // Load properties for filter
+  useEffect(() => {
+    const load = async () => {
+      setLoadingProperties(true)
+      try {
+        const res = await propertiesService.listMyProperties()
+        if (!res.error && res.data) {
+          setProperties(res.data.map(p => ({ id: p.id, name: p.name })))
+        }
+      } catch (e) {
+        // ignore
+      } finally {
+        setLoadingProperties(false)
+      }
+    }
+    load()
+  }, [])
+
+  // Ensure a valid end date when switching to custom or changing start date
+  useEffect(() => {
+    if (preset === 'custom') {
+      if (!customEndDate || customEndDate <= reportStartDate) {
+        setCustomEndDate(addDays(reportStartDate, 1))
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset])
+
+  useEffect(() => {
+    if (preset === 'custom') {
+      if (!customEndDate || customEndDate <= reportStartDate) {
+        setCustomEndDate(addDays(reportStartDate, 1))
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportStartDate])
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200">
       {/* Report Header - Hidden when printing */}
@@ -122,7 +173,7 @@ export function BookingsReport({ startDate }: BookingsReportProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Start Date
@@ -133,6 +184,57 @@ export function BookingsReport({ startDate }: BookingsReportProps) {
               onChange={(e) => setReportStartDate(new Date(e.target.value))}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+          </div>
+          {preset === 'custom' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                End Date
+              </label>
+              <input
+                type="date"
+                value={format(customEndDate, 'yyyy-MM-dd')}
+                onChange={(e) => {
+                  const d = new Date(e.target.value)
+                  if (d > reportStartDate) {
+                    setCustomEndDate(d)
+                  } else {
+                    // Ensure end date is after start date
+                    setCustomEndDate(addDays(reportStartDate, 1))
+                  }
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Range
+            </label>
+            <select
+              value={preset}
+              onChange={(e) => setPreset(e.target.value as '30d' | '3m' | 'custom')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="30d">Next 30 Days</option>
+              <option value="3m">Next 3 Months</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Property
+            </label>
+            <select
+              value={propertyId}
+              onChange={(e) => setPropertyId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={loadingProperties}
+            >
+              <option value="">All Properties</option>
+              {properties.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
@@ -145,7 +247,7 @@ export function BookingsReport({ startDate }: BookingsReportProps) {
             Bookings Report
           </h2>
           <p className="text-gray-600 mt-1 print:text-sm">
-            {format(reportStartDate, 'MMMM yyyy')} - {format(reportEndDate, 'MMMM yyyy')}
+            {format(reportStartDate, 'MMM dd, yyyy')} - {format(reportEndDate, 'MMM dd, yyyy')}
           </p>
           <p className="text-sm text-gray-500 mt-1 print:hidden">
             Generated: {format(new Date(), 'MMMM dd, yyyy HH:mm')}
@@ -204,7 +306,7 @@ export function BookingsReport({ startDate }: BookingsReportProps) {
                                 </div>
                                 {booking.contact_email && (
                                   <div className="text-xs text-gray-500 mt-1 print:hidden">
-                                    {booking.contact_email}
+                                    {emailToLink(booking.contact_email)}
                                   </div>
                                 )}
                               </div>
@@ -218,7 +320,7 @@ export function BookingsReport({ startDate }: BookingsReportProps) {
                                   </div>
                                 )}
                                 <div className="text-xs text-gray-500 mt-1 print:hidden">
-                                  {booking.booking_platform}
+                                  {formatPlatformName(booking.booking_platform)}
                                 </div>
                               </div>
                             </div>

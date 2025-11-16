@@ -8,6 +8,9 @@ type CleaningUpdate = Database['public']['Tables']['cleanings']['Update']
 export interface CleaningWithProperty extends Cleaning {
   property_name?: string
   property_address?: string
+  cleaner_full_name?: string
+  cleaner_email?: string
+  cleaner_id?: string | null
 }
 
 export interface CreateCleaningData {
@@ -164,7 +167,6 @@ export class CleaningService {
         status: cleaningData.status || 'scheduled',
         notes: cleaningData.notes,
         cost: cleaningData.cost,
-        cleaner_id: cleaningData.cleaner_id
       }
 
       const { data, error } = await supabase
@@ -204,6 +206,8 @@ export class CleaningService {
         ...(updateData.cleaner_id !== undefined && { cleaner_id: updateData.cleaner_id })
       }
 
+      console.log('Updating cleaning with fields:', updateFields)
+
       const { data, error } = await supabase
         .from('cleanings')
         .update(updateFields)
@@ -213,6 +217,7 @@ export class CleaningService {
 
       if (error) {
         console.error('Error updating cleaning:', error)
+        console.error('Error details:', JSON.stringify(error, null, 2))
         return { data: null, error: error.message }
       }
 

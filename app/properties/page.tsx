@@ -25,6 +25,7 @@ function PropertiesView() {
   const [notes, setNotes] = useState('')
   const [defaultCleaningCost, setDefaultCleaningCost] = useState('')
   const [cleaningDuration, setCleaningDuration] = useState('')
+  const [timezone, setTimezone] = useState('UTC')
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
@@ -32,6 +33,7 @@ function PropertiesView() {
   const [editNotes, setEditNotes] = useState('')
   const [editDefaultCleaningCost, setEditDefaultCleaningCost] = useState('')
   const [editCleaningDuration, setEditCleaningDuration] = useState('')
+  const [editTimezone, setEditTimezone] = useState('UTC')
   const [showCalendarSources, setShowCalendarSources] = useState<string | null>(null)
   const [calendarSources, setCalendarSources] = useState<{ [propertyId: string]: CalendarSource[] }>({})
   const [showAddCalendar, setShowAddCalendar] = useState<string | null>(null)
@@ -66,7 +68,8 @@ function PropertiesView() {
       address: address.trim(), 
       notes: notes.trim() || undefined,
       default_cleaning_cost: defaultCleaningCost ? parseFloat(defaultCleaningCost) : undefined,
-      cleaning_duration_minutes: cleaningDuration ? parseInt(cleaningDuration) : undefined
+      cleaning_duration_minutes: cleaningDuration ? parseInt(cleaningDuration) : undefined,
+      timezone: timezone || 'UTC'
     })
     setSaving(false)
     if (res.error) {
@@ -79,6 +82,7 @@ function PropertiesView() {
     setNotes('')
     setDefaultCleaningCost('')
     setCleaningDuration('')
+    setTimezone('UTC')
     await load()
   }
 
@@ -383,7 +387,7 @@ function PropertiesView() {
         {loading ? (
           <div className="text-gray-600">Loading...</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {properties.map((p) => (
               <div key={p.id} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 {/* Property Image Header */}
@@ -410,8 +414,24 @@ function PropertiesView() {
                           <input type="number" value={editCleaningDuration} onChange={e=>setEditCleaningDuration(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2"/>
                         </div>
                       </div>
+                      <div>
+                        <label className="block text-sm text-gray-700 mb-1">Timezone</label>
+                        <select value={editTimezone} onChange={e=>setEditTimezone(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2">
+                          <option value="UTC">UTC</option>
+                          <option value="America/New_York">Eastern Time (ET)</option>
+                          <option value="America/Chicago">Central Time (CT)</option>
+                          <option value="America/Denver">Mountain Time (MT)</option>
+                          <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                          <option value="Europe/London">London (GMT)</option>
+                          <option value="Europe/Paris">Paris (CET)</option>
+                          <option value="Europe/Rome">Rome (CET)</option>
+                          <option value="Asia/Tokyo">Tokyo (JST)</option>
+                          <option value="Australia/Sydney">Sydney (AEST)</option>
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">Used for scheduling cleanings after checkout (typically 10 AM checkout = 11 AM cleaning)</p>
+                      </div>
                       <div className="flex gap-2">
-                        <button onClick={async()=>{ setSaving(true); const r=await propertiesService.updateProperty({ id:p.id, name:editName, address:editAddress, notes:editNotes||null, default_cleaning_cost: editDefaultCleaningCost!=='' ? parseFloat(editDefaultCleaningCost) : null, cleaning_duration_minutes: editCleaningDuration!=='' ? parseInt(editCleaningDuration) : null }); setSaving(false); if(r.error){ setError(r.error) } else { setEditingId(null); await load() } }} className="px-3 py-2 rounded bg-blue-600 text-white">Save</button>
+                        <button onClick={async()=>{ setSaving(true); const r=await propertiesService.updateProperty({ id:p.id, name:editName, address:editAddress, notes:editNotes||null, default_cleaning_cost: editDefaultCleaningCost!=='' ? parseFloat(editDefaultCleaningCost) : null, cleaning_duration_minutes: editCleaningDuration!=='' ? parseInt(editCleaningDuration) : null, timezone: editTimezone || 'UTC' }); setSaving(false); if(r.error){ setError(r.error) } else { setEditingId(null); await load() } }} className="px-3 py-2 rounded bg-blue-600 text-white">Save</button>
                         <button onClick={()=>{ setEditingId(null) }} className="px-3 py-2 rounded border">Cancel</button>
                       </div>
                     </div>
@@ -421,8 +441,13 @@ function PropertiesView() {
                       <p className="text-gray-600 mt-1">{p.address}</p>
                       <div className="mt-3 space-y-2">
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={()=>{ setEditingId(p.id); setEditName(p.name); setEditAddress(p.address); setEditNotes(p.notes||''); setEditDefaultCleaningCost((p as any).default_cleaning_cost?.toString() || ''); setEditCleaningDuration((p as any).cleaning_duration_minutes?.toString() || '') }} className="text-blue-600 hover:text-blue-700 text-sm">Edit</button>
-                          <label className={`text-sm cursor-pointer ${saving ? 'text-gray-400' : 'text-gray-700 hover:text-blue-600'}`}>
+                          <button 
+                            onClick={()=>{ setEditingId(p.id); setEditName(p.name); setEditAddress(p.address); setEditNotes(p.notes||''); setEditDefaultCleaningCost((p as any).default_cleaning_cost?.toString() || ''); setEditCleaningDuration((p as any).cleaning_duration_minutes?.toString() || ''); setEditTimezone((p as any).timezone || 'UTC') }} 
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <label className={`px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer ${saving ? 'bg-gray-300 text-gray-500' : 'bg-gray-600 hover:bg-gray-700 text-white'}`}>
                             <input 
                               type="file" 
                               accept="image/*" 
@@ -464,8 +489,14 @@ function PropertiesView() {
                                 }
                               }} 
                             />
-                            {saving ? 'Uploading...' : 'Upload photo'}
+                            {saving ? 'Uploading...' : 'Upload Photo'}
                           </label>
+                          <a 
+                            href={`/properties/${p.id}/referral-sites`}
+                            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-md transition-colors inline-block"
+                          >
+                            Referral Providers
+                          </a>
                           <button 
                             onClick={async()=>{ 
                               if (showCalendarSources === p.id) {
@@ -475,7 +506,7 @@ function PropertiesView() {
                                 await loadCalendarSources(p.id)
                               }
                             }} 
-                            className="text-green-600 hover:text-green-700 text-sm"
+                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-md transition-colors"
                           >
                             ICS Calendars
                           </button>
@@ -606,6 +637,22 @@ function PropertiesView() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Cleaning Duration (mins)</label>
                     <input type="number" value={cleaningDuration} onChange={e=>setCleaningDuration(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2"/>
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+                  <select value={timezone} onChange={e=>setTimezone(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2">
+                    <option value="UTC">UTC</option>
+                    <option value="America/New_York">Eastern Time (ET)</option>
+                    <option value="America/Chicago">Central Time (CT)</option>
+                    <option value="America/Denver">Mountain Time (MT)</option>
+                    <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                    <option value="Europe/London">London (GMT)</option>
+                    <option value="Europe/Paris">Paris (CET)</option>
+                    <option value="Europe/Rome">Rome (CET)</option>
+                    <option value="Asia/Tokyo">Tokyo (JST)</option>
+                    <option value="Australia/Sydney">Sydney (AEST)</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Used for scheduling cleanings after checkout (typically 10 AM checkout = 11 AM cleaning)</p>
                 </div>
               </div>
               <div className="mt-6 flex justify-end gap-2">

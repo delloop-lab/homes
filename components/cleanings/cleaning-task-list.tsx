@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useCleanings, useCleaningMutations } from '@/hooks/use-cleanings'
 import { CleaningWithProperty } from '@/lib/cleanings'
 import { format, isToday, isTomorrow, isPast, differenceInHours } from 'date-fns'
+import { createClient } from '@/lib/supabase'
 import { 
   Calendar,
   Clock,
@@ -21,19 +22,22 @@ import {
   CheckCircle,
   XCircle,
   RefreshCw,
-  Trash2
+  Trash2,
+  Pencil
 } from 'lucide-react'
 
 interface CleaningTaskListProps {
   cleaner_id?: string
   showFilters?: boolean
   mobileOptimized?: boolean
+  isCleanerView?: boolean // If true, hide Edit and Delete buttons
 }
 
 export function CleaningTaskList({ 
   cleaner_id, 
   showFilters = true,
-  mobileOptimized = true 
+  mobileOptimized = true,
+  isCleanerView = false 
 }: CleaningTaskListProps) {
   const [filters, setFilters] = useState({
     property_id: '',
@@ -44,6 +48,9 @@ export function CleaningTaskList({
   const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
   const [updatingTasks, setUpdatingTasks] = useState<Set<string>>(new Set())
+  const [editingCleaningId, setEditingCleaningId] = useState<string | null>(null)
+  const [cleaners, setCleaners] = useState<Array<{ id: string; full_name: string; email: string }>>([])
+  const [loadingCleaners, setLoadingCleaners] = useState(false)
 
   const { 
     cleanings, 
@@ -62,7 +69,35 @@ export function CleaningTaskList({
     autoRefresh: true
   })
 
-  const { updateStatus, startCleaning, completeCleaning, deleteCleaning } = useCleaningMutations()
+  const { updateStatus, startCleaning, completeCleaning, deleteCleaning, updateCleaning } = useCleaningMutations()
+
+  // Fetch cleaners for assignment
+  useEffect(() => {
+    const fetchCleaners = async () => {
+      setLoadingCleaners(true)
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('id, full_name, email')
+          .eq('role', 'cleaner')
+          .eq('is_active', true)
+          .order('full_name')
+        
+        if (error) {
+          console.error('Error fetching cleaners:', error)
+        } else {
+          setCleaners(data || [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch cleaners:', err)
+      } finally {
+        setLoadingCleaners(false)
+      }
+    }
+
+    fetchCleaners()
+  }, [])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -453,40 +488,57 @@ export function CleaningTaskList({
                             </button>
                           )}
 
-                          {/* Delete Button - Only for hosts/admins */}
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation()
-                              if (confirm('Are you sure you want to permanently delete this cleaning task? This action cannot be undone.')) {
-                                setUpdatingTasks(prev => new Set(prev).add(cleaning.id))
-                                try {
-                                  const result = await deleteCleaning(cleaning.id)
-                                  if (result.success) {
-                                    refetch()
-                                  } else {
-                                    alert(`Failed to delete: ${result.error}`)
+                          {/* Edit Button - Only for hosts/admins, not cleaners */}
+                          {!isCleanerView && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setEditingCleaningId(cleaning.id)
+                              }}
+                              disabled={isUpdating}
+                              className="flex items-center px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Pencil className="h-4 w-4 mr-1" />
+                              Edit
+                            </button>
+                          )}
+
+                          {/* Delete Button - Only for hosts/admins, not cleaners */}
+                          {!isCleanerView && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                if (confirm('Are you sure you want to permanently delete this cleaning task? This action cannot be undone.')) {
+                                  setUpdatingTasks(prev => new Set(prev).add(cleaning.id))
+                                  try {
+                                    const result = await deleteCleaning(cleaning.id)
+                                    if (result.success) {
+                                      refetch()
+                                    } else {
+                                      alert(`Failed to delete: ${result.error}`)
+                                    }
+                                  } catch (error) {
+                                    alert(`Error deleting task: ${error}`)
+                                  } finally {
+                                    setUpdatingTasks(prev => {
+                                      const newSet = new Set(prev)
+                                      newSet.delete(cleaning.id)
+                                      return newSet
+                                    })
                                   }
-                                } catch (error) {
-                                  alert(`Error deleting task: ${error}`)
-                                } finally {
-                                  setUpdatingTasks(prev => {
-                                    const newSet = new Set(prev)
-                                    newSet.delete(cleaning.id)
-                                    return newSet
-                                  })
                                 }
-                              }
-                            }}
-                            disabled={isUpdating}
-                            className="flex items-center px-3 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {isUpdating ? (
-                              <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                            ) : (
-                              <Trash2 className="h-4 w-4 mr-1" />
-                            )}
-                            Delete
-                          </button>
+                              }}
+                              disabled={isUpdating}
+                              className="flex items-center px-3 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isUpdating ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                              ) : (
+                                <Trash2 className="h-4 w-4 mr-1" />
+                              )}
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -513,6 +565,166 @@ export function CleaningTaskList({
           </div>
         )}
       </div>
+
+      {/* Edit Cleaning Modal */}
+      {editingCleaningId && (() => {
+        const cleaning = cleanings.find(c => c.id === editingCleaningId)
+        if (!cleaning) return null
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold text-gray-900">Edit Cleaning Task</h2>
+                  <button
+                    onClick={() => setEditingCleaningId(null)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-6 w-6" />
+                  </button>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault()
+                    const formData = new FormData(e.currentTarget)
+                    const cleaner_id = formData.get('cleaner_id') as string
+                    const cost = formData.get('cost') as string
+                    const notes = formData.get('notes') as string
+
+                    console.log('Submitting cleaning update:', { 
+                      id: cleaning.id, 
+                      cleaner_id, 
+                      cost, 
+                      notes 
+                    })
+
+                    setUpdatingTasks(prev => new Set(prev).add(cleaning.id))
+                    try {
+                      // Add 10 second timeout
+                      const updatePromise = updateCleaning({
+                        id: cleaning.id,
+                        cleaner_id: cleaner_id || undefined,
+                        cost: cost ? parseFloat(cost) : undefined,
+                        notes: notes || undefined
+                      })
+
+                      const timeoutPromise = new Promise<{ success: boolean; error: string }>((resolve) =>
+                        setTimeout(() => resolve({ success: false, error: 'Update timed out after 10 seconds' }), 10000)
+                      )
+
+                      const result = await Promise.race([updatePromise, timeoutPromise])
+
+                      console.log('Update result:', result)
+
+                      if (result.success) {
+                        setEditingCleaningId(null)
+                        refetch()
+                      } else {
+                        alert(`Failed to update: ${result.error}`)
+                      }
+                    } catch (error) {
+                      console.error('Update error:', error)
+                      alert(`Error updating task: ${error}`)
+                    } finally {
+                      setUpdatingTasks(prev => {
+                        const newSet = new Set(prev)
+                        newSet.delete(cleaning.id)
+                        return newSet
+                      })
+                    }
+                  }}
+                  className="space-y-4"
+                >
+                  {/* Property Info */}
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <p className="text-sm font-medium text-gray-900">{cleaning.property_name}</p>
+                    <p className="text-xs text-gray-600">{cleaning.property_address}</p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {format(new Date(cleaning.cleaning_date), 'PPp')}
+                    </p>
+                  </div>
+
+                  {/* Assign Cleaner */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Assign Cleaner
+                    </label>
+                    <select
+                      name="cleaner_id"
+                      defaultValue={cleaning.cleaner_id || ''}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Unassigned</option>
+                      {cleaners.map((cleaner) => (
+                        <option key={cleaner.id} value={cleaner.id}>
+                          {cleaner.full_name} ({cleaner.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Cost */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Cost ($)
+                    </label>
+                    <input
+                      type="number"
+                      name="cost"
+                      step="0.01"
+                      min="0"
+                      defaultValue={cleaning.cost || ''}
+                      placeholder="0.00"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Notes
+                    </label>
+                    <textarea
+                      name="notes"
+                      rows={3}
+                      defaultValue={cleaning.notes || ''}
+                      placeholder="Add any notes about this cleaning..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setEditingCleaningId(null)}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={updatingTasks.has(cleaning.id)}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {updatingTasks.has(cleaning.id) ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin inline mr-2" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Changes'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

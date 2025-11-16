@@ -87,8 +87,8 @@ ${job.notes ? `Notes: ${job.notes}` : ''}
       },
       subject: subject,
       html: htmlContent,
-      text: textContent,
-      tags: ['cleaning-job', 'assignment']
+      text: textContent
+      // Note: tags removed - Resend validation may fail with them
     })
 
     console.log('Email result:', emailResult)

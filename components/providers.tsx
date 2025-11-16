@@ -62,33 +62,64 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // Get initial session and profile
     const getInitialSession = async () => {
       try {
-        // Add timeout to prevent infinite loading, but make it longer and more graceful
+        // Add timeout to prevent infinite loading - use a reasonable timeout
         const sessionPromise = supabase.auth.getSession()
-        let timeoutFired = false
         const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) => {
           setTimeout(() => {
-            timeoutFired = true
-            // Only log if it's actually taking too long (20+ seconds)
             resolve({ data: { session: null } })
-          }, 20000) // Increased to 20 seconds
+          }, 5000) // 5 second timeout - much more reasonable
         })
         
         const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise])
         const authUser = session?.user as AuthUser || null
         setUser(authUser)
         
-        if (authUser) {
+        // If no session, set loading to false immediately and return
+        if (!authUser || !session) {
+          setProfile(null)
+          setRole(null)
+          setLoading(false)
+          return
+        }
+        
+        // Only fetch profile if we have a valid user and session
+        if (authUser && session) {
+          // Double-check session is still valid before fetching profile
+          const { data: { session: currentSession } } = await supabase.auth.getSession()
+          if (!currentSession || !currentSession.user) {
+            // Session was cleared (user signed out), skip profile fetch
+            setProfile(null)
+            setRole(null)
+            setLoading(false)
+            return
+          }
+        
           // Fetch or create user profile with timeout
           try {
             const profilePromise = authService.getUserProfile(authUser.id)
             const profileTimeoutPromise = new Promise<null>((resolve) => {
               setTimeout(() => {
-                console.warn('Profile fetch timed out after 5s')
                 resolve(null)
               }, 5000)
             })
             
             let userProfile = await Promise.race([profilePromise, profileTimeoutPromise])
+            
+            // Check if session is still valid before setting profile
+            // If session is gone, user likely signed out - skip setting profile
+            const { data: { session: verifySession } } = await supabase.auth.getSession()
+            if (!verifySession || !verifySession.user) {
+              // User signed out during profile fetch, skip setting profile
+              setProfile(null)
+              setRole(null)
+              setLoading(false)
+              return
+            }
+            
+            // Only log timeout warning if session still exists and profile is null
+            if (!userProfile && verifySession && verifySession.user) {
+              console.warn('Profile fetch timed out after 5s (session still active)')
+            }
             
             if (!userProfile) {
               try {
@@ -218,12 +249,23 @@ export function Providers({ children }: { children: React.ReactNode }) {
         }
         return
       }
-      await authService.signIn(email, password)
-    } catch (error) {
-      throw error
-    } finally {
+      
+      // Add timeout to prevent hanging
+      const signInPromise = authService.signIn(email, password)
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Connection timeout. Please check your internet and try again.')), 8000)
+      )
+      
+      await Promise.race([signInPromise, timeoutPromise])
+      console.log('✓ Auth service sign in completed')
+    } catch (error: any) {
+      console.error('Sign in error:', error)
       setLoading(false)
+      // Re-throw with better error message
+      const message = error?.message || error?.error_description || 'Invalid email or password'
+      throw new Error(message)
     }
+    // Loading will be set to false by redirect
   }
 
   const signUp = async (email: string, password: string, fullName: string, role: UserRole = 'host') => {

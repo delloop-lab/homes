@@ -5,6 +5,11 @@ import { useBookings } from '@/hooks/use-bookings'
 import { propertiesService } from '@/lib/properties'
 import { BookingWithProperty } from '@/lib/bookings'
 import { BookingForm } from '@/components/bookings/booking-form'
+import { createClient } from '@/lib/supabase'
+import { referralSiteService } from '@/lib/referral-sites'
+import { getBookingPlatformLink, formatPlatformName } from '@/lib/booking-platforms'
+import { emailToLink } from '@/lib/email-utils'
+import { UserProfile } from '@/lib/auth'
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -15,7 +20,14 @@ import {
   Edit,
   MapPin,
   User,
-  Clock
+  Clock,
+  Send,
+  Loader2,
+  X,
+  Mail,
+  CheckCircle,
+  XCircle,
+  Trash2
 } from 'lucide-react'
 import { format, 
   startOfMonth, 
@@ -666,6 +678,76 @@ interface BookingDetailsModalProps {
 }
 
 function BookingDetailsModal({ booking, onClose, onEdit }: BookingDetailsModalProps) {
+  const [showSendToCleaner, setShowSendToCleaner] = useState(false)
+  const [cleaners, setCleaners] = useState<UserProfile[]>([])
+  const [selectedCleanerId, setSelectedCleanerId] = useState('')
+  const [hostNote, setHostNote] = useState('')
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null)
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const [emailLogs, setEmailLogs] = useState<any[]>([])
+  const [showEmailLogs, setShowEmailLogs] = useState(false)
+  const [loadingEmails, setLoadingEmails] = useState(false)
+  const [emailFilter, setEmailFilter] = useState('')
+  const [emailTypeFilter, setEmailTypeFilter] = useState<string>('all')
+  const [referralConfig, setReferralConfig] = useState<any | null>(null)
+  const [currencySymbol, setCurrencySymbol] = useState<string>('$')
+  const getCurrencySymbol = (code?: string | null): string => {
+    const c = (code || '').toUpperCase().trim()
+    const map: Record<string, string> = {
+      USD: '$', EUR: '€', GBP: '£', NGN: '₦', GHS: '₵', JPY: '¥', CNY: '¥', INR: '₹',
+      AUD: '$', NZD: '$', CAD: '$', SGD: '$', ZAR: 'R', BRL: 'R$', MXN: '$', TRY: '₺',
+      RUB: '₽', AED: 'د.إ', SAR: '﷼', KES: 'KSh', UGX: 'USh', TZS: 'TSh'
+    }
+    return map[c] || '$'
+  }
+  const platformLink = useMemo(() => {
+    if (!booking) return null
+    return getBookingPlatformLink({
+      booking_platform: booking.booking_platform,
+      external_hotel_id: (booking as any).external_hotel_id,
+      external_reservation_id: (booking as any).external_reservation_id,
+      reservation_url: booking.reservation_url
+    }, referralConfig || undefined)
+  }, [booking, referralConfig])
+
+  useEffect(() => {
+    // First, check if booking has currency field set
+    const bookingCurrency = (booking as any)?.currency
+    if (bookingCurrency) {
+      setCurrencySymbol(getCurrencySymbol(bookingCurrency))
+    }
+    
+    const loadReferral = async () => {
+      try {
+        // If booking already has currency, use it and skip referral config lookup
+        if (bookingCurrency) {
+          setReferralConfig(null)
+          return
+        }
+        
+        const platform = booking.booking_platform || ''
+        let res = await referralSiteService.getConfig(booking.property_id, platform)
+        if ((!res.data || (!res.data.currency_symbol && !res.data.currency_code)) && platform.toLowerCase().includes('booking')) {
+          res = await referralSiteService.getConfig(booking.property_id, 'booking.com')
+        }
+        if ((!res.data || (!res.data.currency_symbol && !res.data.currency_code)) && platform.toLowerCase() === 'booking.com') {
+          res = await referralSiteService.getConfig(booking.property_id, 'booking')
+        }
+        setReferralConfig(res.data || null)
+        const symbol = res.data?.currency_symbol || getCurrencySymbol(res.data?.currency_code)
+        setCurrencySymbol(symbol || '$')
+      } catch {
+        setReferralConfig(null)
+        // Only set default if booking doesn't have currency
+        if (!bookingCurrency) {
+          setCurrencySymbol('$')
+        }
+      }
+    }
+    loadReferral()
+  }, [booking.property_id, booking.booking_platform, (booking as any)?.currency])
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'confirmed': return 'bg-green-100 text-green-800'
@@ -676,6 +758,88 @@ function BookingDetailsModal({ booking, onClose, onEdit }: BookingDetailsModalPr
       default: return 'bg-gray-100 text-gray-800'
     }
   }
+
+  // Load email logs function - loads both cleaning emails and template emails
+  const loadEmailLogs = async () => {
+    try {
+      const supabase = createClient()
+      if (!supabase) return
+
+      const { data, error } = await supabase
+        .from('cleaning_email_logs')
+        .select('*')
+        .eq('booking_id', booking.id)
+        .order('sent_at', { ascending: false })
+
+      if (!error && data) {
+        setEmailLogs(data)
+      }
+    } catch (err) {
+      console.error('Error loading email logs:', err)
+    }
+  }
+
+  // Load email logs when modal opens
+  useEffect(() => {
+    loadEmailLogs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.id])
+
+  // Delete email log
+  const handleDeleteEmailLog = async (logId: string) => {
+    if (!confirm('Are you sure you want to delete this email log? This action cannot be undone.')) {
+      return
+    }
+
+    try {
+      const supabase = createClient()
+      if (!supabase) return
+
+      const { data, error } = await supabase
+        .from('cleaning_email_logs')
+        .delete()
+        .eq('id', logId)
+        .select()
+
+      if (error) {
+        console.error('Error deleting email log:', error)
+        alert(`Failed to delete email log: ${error.message || error}. Please check RLS policies.`)
+      } else {
+        console.log('Email log deleted successfully:', data)
+        // Reload email logs
+        await loadEmailLogs()
+        // Also update the local state immediately for better UX
+        setEmailLogs(prev => prev.filter(log => log.id !== logId))
+      }
+    } catch (err) {
+      console.error('Error deleting email log:', err)
+      alert('Failed to delete email log. Please try again.')
+    }
+  }
+
+  // Load cleaners when opening send-to-cleaner modal
+  useEffect(() => {
+    if (showSendToCleaner && cleaners.length === 0) {
+      const loadCleaners = async () => {
+        try {
+          const supabase = createClient()
+          if (!supabase) return
+
+          const { data } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('role', 'cleaner')
+            .eq('is_active', true)
+            .order('full_name', { ascending: true })
+
+          setCleaners(data || [])
+        } catch (err) {
+          console.error('Error loading cleaners:', err)
+        }
+      }
+      loadCleaners()
+    }
+  }, [showSendToCleaner, cleaners.length])
 
   // Fallback extractors if DB fields are missing but notes contain details
   const extractFromNotes = (pattern: RegExp): string | undefined => {
@@ -708,26 +872,46 @@ function BookingDetailsModal({ booking, onClose, onEdit }: BookingDetailsModalPr
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-gray-900">Booking Details</h3>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              ×
-            </button>
+      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+        {/* Header - Fixed */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
+          <div className="flex items-center space-x-3">
+            <h3 className="text-xl font-semibold text-gray-900">Booking Details</h3>
+            {emailLogs.length > 0 ? (
+              <button
+                onClick={() => setShowEmailLogs(true)}
+                className="relative p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-full transition-colors"
+                title={`${emailLogs.length} email${emailLogs.length > 1 ? 's' : ''} sent (includes cleaning and guest emails)`}
+              >
+                <Mail className="h-5 w-5" />
+                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-semibold">
+                  {emailLogs.length}
+                </span>
+              </button>
+            ) : (
+              <span className="text-xs text-gray-400" title="No emails sent yet">
+                <Mail className="h-4 w-4 opacity-50" />
+              </span>
+            )}
           </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-1"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
-          <div className="space-y-4">
+        {/* Content - Scrollable */}
+        <div className="overflow-y-auto flex-1 p-6">
+          <div className="space-y-6">
             {/* Guest Info */}
             <div className="flex items-start space-x-3">
-              <User className="h-5 w-5 text-gray-400 mt-0.5" />
-              <div>
-                <div className="font-medium text-gray-900">{booking.guest_name}</div>
+              <User className="h-5 w-5 text-gray-400 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <div className="font-medium text-gray-900 text-base">{booking.guest_name}</div>
                 {booking.contact_email && (
-                  <div className="text-sm text-gray-500">{booking.contact_email}</div>
+                  <div className="text-sm text-gray-500 mt-1">{emailToLink(booking.contact_email)}</div>
                 )}
                 {booking.contact_phone && (
                   <div className="text-sm text-gray-500">{booking.contact_phone}</div>
@@ -737,122 +921,501 @@ function BookingDetailsModal({ booking, onClose, onEdit }: BookingDetailsModalPr
 
             {/* Property Info */}
             <div className="flex items-start space-x-3">
-              <MapPin className="h-5 w-5 text-gray-400 mt-0.5" />
-              <div>
-                <div className="font-medium text-gray-900">{booking.property_name}</div>
+              <MapPin className="h-5 w-5 text-gray-400 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <div className="font-medium text-gray-900 text-base">{booking.property_name}</div>
                 {booking.property_address && (
-                  <div className="text-sm text-gray-500">{booking.property_address}</div>
+                  <div className="text-sm text-gray-500 mt-1">{booking.property_address}</div>
                 )}
               </div>
             </div>
 
-            {/* Dates */}
-            <div className="flex items-start space-x-3">
-              <CalendarIcon className="h-5 w-5 text-gray-400 mt-0.5" />
-              <div>
-                <div className="font-medium text-gray-900">
-                  {format(parseISO(booking.check_in), 'MMM dd, yyyy')} - {format(parseISO(booking.check_out), 'MMM dd, yyyy')}
+            {/* Dates and Status - Side by side */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex items-start space-x-3">
+                <CalendarIcon className="h-5 w-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <div className="font-medium text-gray-900 text-base">
+                    {format(parseISO(booking.check_in), 'MMM dd, yyyy')} - {format(parseISO(booking.check_out), 'MMM dd, yyyy')}
+                  </div>
+                  <div className="text-sm text-gray-500 flex items-center mt-1">
+                    <Clock className="h-3 w-3 mr-1" />
+                    {booking.nights} {booking.nights === 1 ? 'night' : 'nights'}
+                  </div>
                 </div>
-                <div className="text-sm text-gray-500 flex items-center">
-                  <Clock className="h-3 w-3 mr-1" />
-                  {booking.nights} {booking.nights === 1 ? 'night' : 'nights'}
+              </div>
+
+              <div className="flex items-start space-x-3">
+                <div className="flex-1">
+                  <div className="text-sm text-gray-500 mb-2">Status</div>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(booking.status)}`}>
+                    {booking.status.replace('_', ' ')}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Status */}
-            <div>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(booking.status)}`}>
-                {booking.status.replace('_', ' ')}
-              </span>
-            </div>
-
-            {/* Amount */}
-            {booking.total_amount && (
-              <div className="text-lg font-semibold text-gray-900">
-                ${booking.total_amount.toFixed(2)}
+            {/* Financial Breakdown */}
+            {typeof booking.total_amount === 'number' && (
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="text-sm font-medium text-gray-700 mb-3">Financial Details</div>
+                <div className="space-y-2">
+                  {/* Total Amount */}
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Total Amount:</span>
+                    <span className="text-base font-semibold text-gray-900">
+                      {currencySymbol}{booking.total_amount.toFixed(2)}
+                    </span>
+                  </div>
+                  
+                  {/* Commission & Charges */}
+                  {((booking as any).commission_and_charges && (booking as any).commission_and_charges > 0) ? (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Commission & Charges:</span>
+                        <span className="text-base font-semibold text-red-600">
+                          -{currencySymbol}{((booking as any).commission_and_charges || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      
+                      {/* Formula */}
+                      <div className="pt-2 mt-2 border-t border-gray-300">
+                        <div className="flex justify-between items-center text-xs text-gray-500 mb-1">
+                          <span>Formula:</span>
+                          <span className="font-mono">
+                            {currencySymbol}{booking.total_amount.toFixed(2)} - {currencySymbol}{((booking as any).commission_and_charges || 0).toFixed(2)} = {currencySymbol}{Math.max(0, (booking.total_amount || 0) - ((booking as any).commission_and_charges || 0)).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                  
+                  {/* Total Payout */}
+                  <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-300">
+                    <span className="text-sm font-medium text-gray-700">Total Payout:</span>
+                    <span className="text-xl font-bold text-green-600">
+                      {currencySymbol}{Math.max(0, (booking.total_amount || 0) - ((booking as any).commission_and_charges || 0)).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
 
             {/* Platform */}
-            <div className="text-sm text-gray-500">
-              Platform: {booking.booking_platform}
+            <div>
+              <div className="text-sm text-gray-500 mb-1">Platform</div>
+              <div className="text-base font-medium text-gray-900">{formatPlatformName(booking.booking_platform)}</div>
             </div>
-
-            {/* Booking.com Direct Link */}
-            {(booking.booking_platform?.toLowerCase() === 'booking' || booking.booking_platform?.toLowerCase() === 'booking.com') && derivedReservationUrl && (
-              <div>
-                <a
-                  href={derivedReservationUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                >
-                  <span>Open on Booking.com</span>
-                  <svg className="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
-                </a>
-              </div>
-            )}
-
-            {/* Platform Metadata (Airbnb/others) */}
-            {(derivedReservationUrl || booking.listing_name || derivedPhoneLast4 || derivedGuestInitials || booking.event_uid) && (
-              <div className="space-y-2">
-                <div className="font-medium text-gray-900">Platform details</div>
-                {booking.listing_name && (
-                  <div className="text-sm text-gray-600">Listing: {booking.listing_name}</div>
-                )}
-                {derivedGuestInitials && (
-                  <div className="text-sm text-gray-600">
-                    Guest (from feed): {derivedGuestInitials}
-                  </div>
-                )}
-                {derivedPhoneLast4 && (
-                  <div className="text-sm text-gray-600">Guest phone: ••••{derivedPhoneLast4}</div>
-                )}
-                {booking.event_uid && (
-                  <div className="text-sm text-gray-600">Event UID: {booking.event_uid}</div>
-                )}
-                {derivedReservationUrl && (booking.booking_platform?.toLowerCase() !== 'booking' && booking.booking_platform?.toLowerCase() !== 'booking.com') && (
-                  <a
-                    href={derivedReservationUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded"
-                  >
-                    Open Reservation
-                  </a>
-                )}
-              </div>
-            )}
 
             {/* Notes (sanitized) */}
             {sanitizedNotes && (
               <div>
-                <div className="font-medium text-gray-900 mb-1">Notes</div>
-                <div className="text-sm text-gray-600 whitespace-pre-line">{sanitizedNotes}</div>
+                <div className="font-medium text-gray-900 mb-2 text-base">Notes</div>
+                <div className="text-sm text-gray-600 whitespace-pre-line bg-gray-50 p-3 rounded-md">{sanitizedNotes}</div>
               </div>
             )}
           </div>
+        </div>
 
-          <div className="flex items-center justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium"
-            >
-              Close
-            </button>
-            <button
-              onClick={onEdit}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium flex items-center"
-            >
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
-            </button>
+        {/* Footer - Fixed */}
+        <div className="border-t border-gray-200 p-6 flex-shrink-0">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              {platformLink?.url && (
+                <a
+                  href={platformLink.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm flex items-center"
+                >
+                  Open on {formatPlatformName(platformLink.platform || booking.booking_platform || 'platform')}
+                </a>
+              )}
+              <button
+                onClick={() => {
+                  setShowSendToCleaner(true)
+                  setEmailSuccess(null)
+                  setEmailError(null)
+                  setHostNote('')
+                  setSelectedCleanerId('')
+                }}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm flex items-center"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                Send to Cleaner
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium text-sm"
+              >
+                Close
+              </button>
+              <button
+                onClick={onEdit}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm flex items-center"
+              >
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Send to Cleaner Modal */}
+      {showSendToCleaner && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 className="text-xl font-semibold text-gray-900">
+                Send Booking to Cleaner
+              </h3>
+              <button
+                onClick={() => {
+                  setShowSendToCleaner(false)
+                  setEmailSuccess(null)
+                  setEmailError(null)
+                }}
+                className="p-2 text-gray-400 hover:text-gray-600"
+                disabled={sendingEmail}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {emailSuccess && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <p className="text-green-700 text-sm">{emailSuccess}</p>
+                </div>
+              )}
+
+              {emailError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-red-700 text-sm">{emailError}</p>
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="cleaner_select" className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Cleaner *
+                </label>
+                <select
+                  id="cleaner_select"
+                  value={selectedCleanerId}
+                  onChange={(e) => setSelectedCleanerId(e.target.value)}
+                  disabled={sendingEmail}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                >
+                  <option value="">Choose a cleaner...</option>
+                  {cleaners.map(cleaner => (
+                    <option key={cleaner.id} value={cleaner.id}>
+                      {cleaner.full_name || cleaner.email} {cleaner.email ? `(${cleaner.email})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="host_note" className="block text-sm font-medium text-gray-700 mb-2">
+                  Notes for Cleaner
+                </label>
+                <textarea
+                  id="host_note"
+                  value={hostNote}
+                  onChange={(e) => setHostNote(e.target.value)}
+                  disabled={sendingEmail}
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  placeholder="Add any special instructions or notes for the cleaner..."
+                />
+              </div>
+
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+                <p className="font-medium text-gray-900">Email will include:</p>
+                <ul className="list-disc list-inside text-gray-600 space-y-1">
+                  <li>Property: {booking.property_name || 'N/A'}</li>
+                  <li>Check-in: {format(parseISO(booking.check_in), 'MMM dd, yyyy')}</li>
+                  <li>Check-out: {format(parseISO(booking.check_out), 'MMM dd, yyyy')}</li>
+                  {hostNote && <li>Your notes</li>}
+                </ul>
+              </div>
+
+              <div className="flex items-center justify-end space-x-4 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSendToCleaner(false)
+                    setEmailSuccess(null)
+                    setEmailError(null)
+                  }}
+                  disabled={sendingEmail}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 rounded-lg font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!selectedCleanerId) {
+                      setEmailError('Please select a cleaner')
+                      return
+                    }
+
+                    const selectedCleaner = cleaners.find(c => c.id === selectedCleanerId)
+                    if (!selectedCleaner || !selectedCleaner.email) {
+                      setEmailError('Selected cleaner does not have an email address')
+                      return
+                    }
+
+                    setSendingEmail(true)
+                    setEmailError(null)
+                    setEmailSuccess(null)
+
+                    try {
+                      const controller = new AbortController()
+                      const timeoutId = setTimeout(() => controller.abort(), 35000)
+
+                      const response = await fetch('/api/send-booking-to-cleaner', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          booking_id: booking.id,
+                          cleaner_id: selectedCleaner.id,
+                          cleaner_email: selectedCleaner.email,
+                          host_note: hostNote.trim() || undefined
+                        }),
+                        signal: controller.signal
+                      })
+
+                      clearTimeout(timeoutId)
+
+                      if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+                        throw new Error(errorData.error || `HTTP ${response.status}`)
+                      }
+
+                      const result = await response.json()
+
+                      if (result.success) {
+                        setEmailSuccess(`Email sent successfully to ${selectedCleaner.email}`)
+                        setHostNote('')
+                        // Refresh email logs to show the new email
+                        await loadEmailLogs()
+                        setTimeout(() => {
+                          setShowSendToCleaner(false)
+                          setEmailSuccess(null)
+                        }, 2000)
+                      } else {
+                        setEmailError(result.error || 'Failed to send email')
+                      }
+                    } catch (err: any) {
+                      console.error('Error sending email:', err)
+                      if (err.name === 'AbortError') {
+                        setEmailError('Request timed out. Please check your connection and try again.')
+                      } else {
+                        setEmailError(err.message || 'Failed to send email. Please try again.')
+                      }
+                    } finally {
+                      setSendingEmail(false)
+                    }
+                  }}
+                  disabled={sendingEmail || !selectedCleanerId}
+                  className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg font-medium flex items-center"
+                >
+                  {sendingEmail ? (
+                    <>
+                      <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      Send Email
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email Logs Modal */}
+      {showEmailLogs && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[2000]" onClick={() => setShowEmailLogs(false)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 sticky top-0 bg-white">
+              <h3 className="text-xl font-semibold text-gray-900">
+                Emails Sent
+              </h3>
+              <button
+                onClick={() => setShowEmailLogs(false)}
+                className="p-2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="mb-4">
+                <p className="text-sm text-gray-600 mb-3">
+                  {emailLogs.length} email{emailLogs.length > 1 ? 's' : ''} sent for this booking
+                  <br />
+                  <span className="text-xs text-gray-400">
+                    Includes cleaning emails to cleaners and template emails (check-in, checkout, thank you) to guests
+                  </span>
+                </p>
+                
+                {/* Filter and Search */}
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="text"
+                      placeholder="Search by recipient, subject..."
+                      value={emailFilter}
+                      onChange={(e) => setEmailFilter(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <select
+                      value={emailTypeFilter}
+                      onChange={(e) => setEmailTypeFilter(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All Types</option>
+                      <option value="cleaning">Cleaning Emails</option>
+                      <option value="check_in_instructions">Check-in Instructions</option>
+                      <option value="checkout_reminder">Checkout Reminder</option>
+                      <option value="thank_you_review">Thank You & Review</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filtered Email Logs */}
+              {(() => {
+                const filtered = emailLogs.filter(log => {
+                  const matchesSearch = !emailFilter || 
+                    (log.recipient_name || log.cleaner_name || '').toLowerCase().includes(emailFilter.toLowerCase()) ||
+                    (log.cleaner_email || '').toLowerCase().includes(emailFilter.toLowerCase()) ||
+                    (log.subject || '').toLowerCase().includes(emailFilter.toLowerCase())
+                  
+                  const matchesType = emailTypeFilter === 'all' || 
+                    (emailTypeFilter === 'cleaning' && (!log.email_type || log.email_type === 'cleaning')) ||
+                    (log.email_type === emailTypeFilter)
+                  
+                  return matchesSearch && matchesType
+                })
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-gray-500">
+                      No emails found matching your filters.
+                    </div>
+                  )
+                }
+
+                return filtered.map((log, index) => (
+                <div key={log.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="flex-shrink-0">
+                        {log.status === 'sent' ? (
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                        ) : (
+                          <XCircle className="h-5 w-5 text-red-600" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="font-medium text-gray-900">
+                          {log.recipient_name || log.cleaner_name || log.cleaner_email}
+                        </div>
+                        <div className="text-sm text-gray-500">{log.cleaner_email}</div>
+                        {log.email_type && log.email_type !== 'cleaning' && (
+                          <div className="text-xs text-blue-600 mt-1">
+                            {log.email_type === 'check_in_instructions' ? 'Check-in Instructions' :
+                             log.email_type === 'checkout_reminder' ? 'Checkout Reminder' :
+                             log.email_type === 'thank_you_review' ? 'Thank You & Review' :
+                             'Template Email'}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right flex items-center space-x-2">
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{log.subject}</div>
+                        <div className="text-xs text-gray-500">
+                          {format(new Date(log.sent_at), 'MMM dd, yyyy HH:mm')}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteEmailLog(log.id)}
+                        className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-full transition-colors"
+                        title="Delete email log"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    {log.status === 'sent' ? (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Sent
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        <XCircle className="h-3 w-3 mr-1" />
+                        Failed
+                      </span>
+                    )}
+                    {log.provider_message_id && (
+                      <span className="text-xs text-gray-500">
+                        ID: {log.provider_message_id.substring(0, 8)}...
+                      </span>
+                    )}
+                  </div>
+
+                  {log.error_message && (
+                    <div className="bg-red-50 border border-red-200 rounded p-2">
+                      <p className="text-sm text-red-700">{log.error_message}</p>
+                    </div>
+                  )}
+
+                  {log.email_content && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                        View Email Content
+                      </summary>
+                      <div 
+                        className="mt-2 p-3 bg-gray-50 rounded border border-gray-200 max-h-64 overflow-y-auto"
+                        dangerouslySetInnerHTML={{ __html: log.email_content }}
+                      />
+                    </details>
+                  )}
+
+                  {index < filtered.length - 1 && (
+                    <div className="border-t border-gray-200 pt-4 mt-4"></div>
+                  )}
+                </div>
+              ))
+              })()}
+            </div>
+
+            <div className="p-6 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => setShowEmailLogs(false)}
+                className="w-full px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

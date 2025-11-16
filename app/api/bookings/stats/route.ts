@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bookingService } from '@/lib/bookings'
 
+export const dynamic = 'force-dynamic'
+
 // GET /api/bookings/stats - Get booking statistics
 export async function GET(request: NextRequest) {
   try {

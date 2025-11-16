@@ -52,9 +52,11 @@ export async function PUT(
       check_out,
       booking_platform,
       total_amount,
+      commission_and_charges,
       status,
       notes,
-      passport_image_url
+      passport_image_url,
+      currency
     } = body
 
     // Robust parsing helpers
@@ -76,9 +78,11 @@ export async function PUT(
       check_out: parseDate(check_out),
       booking_platform,
       total_amount: parseNumber(total_amount),
+      commission_and_charges: parseNumber(commission_and_charges),
       status,
       notes,
-      passport_image_url
+      passport_image_url,
+      currency
     }
 
     // Remove undefined fields

@@ -70,7 +70,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (tokenInfo.bookings.properties.host_id !== user.id) {
+    const booking = Array.isArray(tokenInfo.bookings) 
+      ? tokenInfo.bookings[0] 
+      : tokenInfo.bookings
+    if (!booking) {
+      return NextResponse.json(
+        { error: 'Booking not found' },
+        { status: 404 }
+      )
+    }
+    const properties = booking.properties
+    const property = Array.isArray(properties) 
+      ? properties[0] 
+      : (properties as { id: any; host_id: any } | undefined)
+    if (!property || property.host_id !== user.id) {
       return NextResponse.json(
         { error: 'You can only revoke tokens for your own bookings' },
         { status: 403 }
@@ -183,7 +196,20 @@ export async function GET(request: NextRequest) {
     }
 
     // Verify host owns this booking
-    if (tokenInfo.bookings.properties.host_id !== user.id) {
+    const booking = Array.isArray(tokenInfo.bookings) 
+      ? tokenInfo.bookings[0] 
+      : tokenInfo.bookings
+    if (!booking) {
+      return NextResponse.json(
+        { error: 'Booking not found' },
+        { status: 404 }
+      )
+    }
+    const properties = booking.properties
+    const property = Array.isArray(properties) 
+      ? properties[0] 
+      : (properties as { id: any; name: any; host_id: any } | undefined)
+    if (!property || property.host_id !== user.id) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
@@ -203,8 +229,8 @@ export async function GET(request: NextRequest) {
         expires_at: tokenInfo.expires_at,
         access_count: tokenInfo.access_count,
         booking: {
-          guest_name: tokenInfo.bookings.guest_name,
-          property_name: tokenInfo.bookings.properties.name
+          guest_name: booking.guest_name,
+          property_name: property.name
         }
       }
     })

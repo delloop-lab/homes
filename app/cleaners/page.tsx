@@ -5,11 +5,45 @@ import { AuthenticatedRoute } from '@/components/auth/route-guard'
 import { DashboardHeader } from '@/components/dashboard/header'
 import { createClient } from '@/lib/supabase'
 import { UserProfile } from '@/lib/auth'
+import { useAuth } from '@/components/providers'
 import { User, Mail, Phone, DollarSign, Plus, Edit, Trash2, Send, Loader2 } from 'lucide-react'
 
+// Currency symbol mapping
+const getCurrencySymbol = (currencyCode?: string): string => {
+  const currencyMap: Record<string, string> = {
+    'USD': '$',
+    'EUR': '€',
+    'GBP': '£',
+    'AUD': 'A$',
+    'CAD': 'C$',
+    'JPY': '¥',
+    'CHF': 'CHF',
+    'CNY': '¥',
+    'INR': '₹',
+    'BRL': 'R$',
+    'MXN': '$',
+    'ZAR': 'R',
+    'NZD': 'NZ$',
+    'SGD': 'S$',
+    'HKD': 'HK$',
+    'SEK': 'kr',
+    'NOK': 'kr',
+    'DKK': 'kr',
+    'PLN': 'zł',
+    'TRY': '₺',
+    'RUB': '₽'
+  }
+  return currencyMap[currencyCode || 'USD'] || currencyCode || '$'
+}
+
 export default function CleanersPage() {
+  const { profile: hostProfile } = useAuth()
+  const hostCurrency = hostProfile?.currency || 'USD'
+  const currencySymbol = getCurrencySymbol(hostCurrency)
+  
   const [cleaners, setCleaners] = useState<UserProfile[]>([])
   const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -61,31 +95,115 @@ export default function CleanersPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setSuccess(null)
+    
+    if (submitting) {
+      console.log('Already submitting, ignoring duplicate submit')
+      return
+    }
 
     try {
+      setSubmitting(true)
       const supabase = createClient()
       if (!supabase) {
         setError('Supabase client not available')
+        setSubmitting(false)
         return
       }
 
       if (editingCleaner) {
         // Update existing cleaner
-        const { error: updateError } = await supabase
+        console.log('Updating cleaner:', {
+          id: editingCleaner.id,
+          current: {
+            email: editingCleaner.email,
+            full_name: editingCleaner.full_name,
+            phone: editingCleaner.phone,
+            hourly_rate: editingCleaner.hourly_rate
+          },
+          new: formData
+        })
+        
+        const updateData: any = {
+          email: formData.email.trim(),
+          full_name: formData.full_name.trim(),
+          phone: formData.phone?.trim() || null,
+          updated_at: new Date().toISOString()
+        }
+        
+        // Only include hourly_rate if it's provided
+        if (formData.hourly_rate && formData.hourly_rate.trim() !== '') {
+          const parsedRate = parseFloat(formData.hourly_rate)
+          if (!isNaN(parsedRate)) {
+            updateData.hourly_rate = parsedRate
+          } else {
+            updateData.hourly_rate = null
+          }
+        } else {
+          updateData.hourly_rate = null
+        }
+        
+        console.log('Update payload:', updateData)
+        
+        const { data: updateResult, error: updateError } = await supabase
           .from('user_profiles')
-          .update({
-            email: formData.email,
-            full_name: formData.full_name,
-            phone: formData.phone || null,
-            hourly_rate: formData.hourly_rate ? parseFloat(formData.hourly_rate) : null,
-            updated_at: new Date().toISOString()
-          })
+          .update(updateData)
           .eq('id', editingCleaner.id)
+          .select()
 
         if (updateError) {
-          setError(updateError.message)
+          console.error('Update error:', updateError)
+          setError(updateError.message || 'Failed to update cleaner')
+          setSubmitting(false)
           return
         }
+        
+        console.log('Update result:', updateResult)
+        
+        // Verify the update by fetching the specific record
+        const { data: verifyData, error: verifyError } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', editingCleaner.id)
+          .single()
+        
+        if (verifyError) {
+          console.error('Verify error:', verifyError)
+          setError('Update may have failed - could not verify: ' + verifyError.message)
+          setSubmitting(false)
+          return
+        }
+        
+        console.log('Verified updated data:', verifyData)
+        
+        // Check if the update actually changed the values
+        const changesDetected = 
+          verifyData.email !== editingCleaner.email ||
+          verifyData.full_name !== editingCleaner.full_name ||
+          verifyData.phone !== editingCleaner.phone ||
+          verifyData.hourly_rate !== editingCleaner.hourly_rate
+        
+        if (!changesDetected && updateResult && updateResult.length === 0) {
+          console.warn('Update may have been blocked by RLS - no changes detected and no data returned')
+          setError('Update may have been blocked. Please check RLS policies allow hosts to update cleaner profiles.')
+          setSubmitting(false)
+          return
+        }
+        
+        console.log('Update successful, reloading cleaners list...')
+        
+        // Reload cleaners list BEFORE closing form to ensure fresh data
+        await loadCleaners()
+        
+        setSuccess('Cleaner updated successfully')
+        setSubmitting(false)
+        setShowForm(false)
+        setEditingCleaner(null)
+        setFormData({ email: '', full_name: '', phone: '', hourly_rate: '' })
+        
+        // Clear success message after 3 seconds
+        setTimeout(() => setSuccess(null), 3000)
+        return
       } else {
         // Create new cleaner profile via API route (handles auth user creation)
         const response = await fetch('/api/create-cleaner', {
@@ -102,20 +220,27 @@ export default function CleanersPage() {
         const result = await response.json()
         if (!result.success) {
           setError(result.error || 'Failed to create cleaner')
+          setSubmitting(false)
           return
         }
         
         // Show success message
         setSuccess(result.message || 'Cleaner created successfully')
+        
+        // Reload cleaners list BEFORE closing form
+        await loadCleaners()
+        setSubmitting(false)
+        setShowForm(false)
+        setEditingCleaner(null)
+        setFormData({ email: '', full_name: '', phone: '', hourly_rate: '' })
+        
+        // Clear success message after 3 seconds
+        setTimeout(() => setSuccess(null), 3000)
       }
-
-      // Reload cleaners list
-      await loadCleaners()
-      setShowForm(false)
-      setEditingCleaner(null)
-      setFormData({ email: '', full_name: '', phone: '', hourly_rate: '' })
     } catch (err) {
+      console.error('Submit error:', err)
       setError(String(err))
+      setSubmitting(false)
     }
   }
 
@@ -276,16 +401,21 @@ export default function CleanersPage() {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Hourly Rate ($)
+                        Hourly Rate ({hostCurrency})
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={formData.hourly_rate}
-                        onChange={(e) => setFormData({ ...formData, hourly_rate: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="25.00"
-                      />
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <span className="text-gray-500 text-sm">{currencySymbol}</span>
+                        </div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={formData.hourly_rate}
+                          onChange={(e) => setFormData({ ...formData, hourly_rate: e.target.value })}
+                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="25.00"
+                        />
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-end space-x-3 pt-4">
@@ -302,9 +432,17 @@ export default function CleanersPage() {
                       </button>
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+                        disabled={submitting}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                       >
-                        {editingCleaner ? 'Update' : 'Create'}
+                        {submitting ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {editingCleaner ? 'Updating...' : 'Creating...'}
+                          </>
+                        ) : (
+                          editingCleaner ? 'Update' : 'Create'
+                        )}
                       </button>
                     </div>
                   </form>
@@ -382,7 +520,7 @@ export default function CleanersPage() {
                           {cleaner.hourly_rate ? (
                             <div className="flex items-center">
                               <DollarSign className="h-4 w-4 mr-1" />
-                              {cleaner.hourly_rate.toFixed(2)}/hr
+                              {currencySymbol}{cleaner.hourly_rate.toFixed(2)}/hr
                             </div>
                           ) : (
                             <span className="text-gray-400">—</span>

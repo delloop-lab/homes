@@ -29,6 +29,7 @@ function SettingsView() {
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [language, setLanguage] = useState('en')
+  const [currency, setCurrency] = useState('USD')
   const [address, setAddress] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
 
@@ -39,6 +40,7 @@ function SettingsView() {
       setEmail(profile.email || '')
       setPhone(profile.phone || '')
       setLanguage((profile as any).language || 'en')
+      setCurrency(profile.currency || 'USD')
       setAddress((profile as any).address || profile.company_address || '')
       setAvatarUrl(profile.avatar_url || '')
     }
@@ -146,6 +148,7 @@ function SettingsView() {
         full_name: `${firstName.trim()} ${lastName.trim()}`.trim(), // Keep full_name in sync
         phone: phone.trim() || null,
         language: language,
+        currency: currency,
         address: address.trim() || null,
         avatar_url: newAvatarUrl || avatarUrl || null,
         updated_at: new Date().toISOString()
@@ -315,6 +318,42 @@ function SettingsView() {
                   <option value="zh">中文</option>
                   <option value="ja">日本語</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Currency
+                </label>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="USD">USD - US Dollar ($)</option>
+                  <option value="EUR">EUR - Euro (€)</option>
+                  <option value="GBP">GBP - British Pound (£)</option>
+                  <option value="AUD">AUD - Australian Dollar (A$)</option>
+                  <option value="CAD">CAD - Canadian Dollar (C$)</option>
+                  <option value="JPY">JPY - Japanese Yen (¥)</option>
+                  <option value="CHF">CHF - Swiss Franc</option>
+                  <option value="CNY">CNY - Chinese Yuan (¥)</option>
+                  <option value="INR">INR - Indian Rupee (₹)</option>
+                  <option value="BRL">BRL - Brazilian Real (R$)</option>
+                  <option value="MXN">MXN - Mexican Peso ($)</option>
+                  <option value="ZAR">ZAR - South African Rand (R)</option>
+                  <option value="NZD">NZD - New Zealand Dollar (NZ$)</option>
+                  <option value="SGD">SGD - Singapore Dollar (S$)</option>
+                  <option value="HKD">HKD - Hong Kong Dollar (HK$)</option>
+                  <option value="SEK">SEK - Swedish Krona (kr)</option>
+                  <option value="NOK">NOK - Norwegian Krone (kr)</option>
+                  <option value="DKK">DKK - Danish Krone (kr)</option>
+                  <option value="PLN">PLN - Polish Złoty (zł)</option>
+                  <option value="TRY">TRY - Turkish Lira (₺)</option>
+                  <option value="RUB">RUB - Russian Ruble (₽)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Used for cleaner hourly rates and reports
+                </p>
               </div>
 
               <div className="md:col-span-2">

@@ -487,6 +487,24 @@ async function upsertBooking(supabase: any, booking: Partial<BookingData>, prope
       existing = found || null
     }
 
+    // Helper function to get default currency for a platform
+    const getPlatformCurrency = (platform?: string): string => {
+      switch (platform?.toLowerCase()) {
+        case 'vrbo':
+          return 'EUR'
+        case 'airbnb':
+          return 'AUD'
+        case 'booking':
+        case 'booking.com':
+          return 'EUR'
+        default:
+          return 'USD'
+      }
+    }
+
+    // Determine currency: preserve existing currency, or set based on platform
+    const currency = existing?.currency || getPlatformCurrency(booking.booking_platform as string)
+
     // Merge logic: preserve host-edited fields if a record already exists
     // Only fill these from feed when they are currently null/empty.
     const bookingData = {
@@ -508,6 +526,7 @@ async function upsertBooking(supabase: any, booking: Partial<BookingData>, prope
       contact_phone: existing ? existing.contact_phone : (booking as any).contact_phone,
       total_amount: existing ? existing.total_amount : (booking as any).total_amount,
       notes: existing ? existing.notes : booking.notes,
+      currency: currency,
 
       property_id: propertyId,
       updated_at: new Date().toISOString()

@@ -19,6 +19,7 @@ export interface CreatePropertyInput {
   notes?: string
   default_cleaning_cost?: number
   cleaning_duration_minutes?: number
+  timezone?: string
 }
 
 export interface UpdatePropertyInput {
@@ -28,6 +29,7 @@ export interface UpdatePropertyInput {
   notes?: string | null
   default_cleaning_cost?: number | null
   cleaning_duration_minutes?: number | null
+  timezone?: string | null
 }
 
 class PropertiesService {
@@ -63,6 +65,28 @@ class PropertiesService {
     }
   }
 
+  async getProperty(propertyId: string): Promise<{ data: Property | null; error: string | null }> {
+    try {
+      const supabase = this.getClient()
+      
+      const { data, error } = await supabase
+        .from('properties')
+        .select('*')
+        .eq('id', propertyId)
+        .single()
+
+      if (error) {
+        console.error('Error fetching property:', error)
+        return { data: null, error: error.message }
+      }
+
+      return { data: data as Property, error: null }
+    } catch (e) {
+      console.error('Get property error:', e)
+      return { data: null, error: String(e) }
+    }
+  }
+
   async createProperty(input: CreatePropertyInput): Promise<{ data: Property | null; error: string | null }> {
     try {
       const supabase = this.getClient()
@@ -79,6 +103,7 @@ class PropertiesService {
           host_id: userId,
           default_cleaning_cost: input.default_cleaning_cost ?? null,
           cleaning_duration_minutes: input.cleaning_duration_minutes ?? null,
+          timezone: input.timezone || 'UTC',
         })
         .select('*')
         .single()

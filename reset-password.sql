@@ -13,3 +13,5 @@ SELECT email, created_at, updated_at, email_confirmed_at, last_sign_in_at
 FROM auth.users
 WHERE email = 'lou@schillaci.me';
 
+
+

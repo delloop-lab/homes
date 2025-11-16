@@ -2,22 +2,53 @@
 
 import { useAuth } from '@/components/providers'
 import { authService } from '@/lib/auth'
-import { LogOut, Settings, User, Crown, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { LogOut, Settings, User, Crown, Loader2, ChevronDown } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
 import { Logo } from '@/components/logo'
 
 export function DashboardHeader() {
   const { user, role, profile, signOut, loading } = useAuth()
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [showMaintenanceMenu, setShowMaintenanceMenu] = useState(false)
+  const [showEmailMenu, setShowEmailMenu] = useState(false)
+  const maintenanceMenuRef = useRef<HTMLDivElement>(null)
+  const emailMenuRef = useRef<HTMLDivElement>(null)
+
+  // Close maintenance menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (maintenanceMenuRef.current && !maintenanceMenuRef.current.contains(event.target as Node)) {
+        setShowMaintenanceMenu(false)
+      }
+      if (emailMenuRef.current && !emailMenuRef.current.contains(event.target as Node)) {
+        setShowEmailMenu(false)
+      }
+    }
+
+    if (showMaintenanceMenu || showEmailMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showMaintenanceMenu, showEmailMenu])
 
   const handleSignOut = async () => {
     setIsSigningOut(true)
     try {
       await signOut()
+      // Use window.location for a hard redirect to avoid any routing issues
+      // This prevents infinite loops and ensures clean logout
+      if (typeof window !== 'undefined') {
+        window.location.href = '/auth'
+      }
     } catch (error) {
       console.error('Sign out error:', error)
-    } finally {
-      setIsSigningOut(false)
+      // Still redirect even on error to ensure user gets to auth page
+      if (typeof window !== 'undefined') {
+        window.location.href = '/auth'
+      }
     }
   }
 
@@ -46,24 +77,18 @@ export function DashboardHeader() {
     <header className="bg-white shadow-sm border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          {/* Logo and Title */}
-          <div className="flex items-center space-x-3">
+          {/* Logo and Title - clickable to go to dashboard */}
+          <a href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
             <div className="flex items-center justify-center">
               <Logo className="w-10 h-10" />
             </div>
             <h1 className="text-xl font-semibold text-gray-900">
               MyGuests
             </h1>
-          </div>
+          </a>
 
           {/* Navigation */}
           <nav className="hidden md:flex space-x-8">
-            <a
-              href="/"
-              className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              Dashboard
-            </a>
             
             {authService.canAccessProperties(role) && (
               <a
@@ -101,46 +126,102 @@ export function DashboardHeader() {
               </a>
             )}
             
+            {/* Maintenance Dropdown Menu - Cleanings and Cleaners */}
             {authService.canAccessCleanings(role) && (
-              <>
-                <a
-                  href="/cleanings"
-                  className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
+              <div className="relative" ref={maintenanceMenuRef}>
+                <button
+                  onClick={() => setShowMaintenanceMenu(!showMaintenanceMenu)}
+                  className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium flex items-center"
                 >
-                  Cleanings
-                </a>
-                <a
-                  href="/send-cleanings"
-                  className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  Send Jobs
-                </a>
-              </>
+                  Maintenance
+                  <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showMaintenanceMenu ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {showMaintenanceMenu && (
+                  <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+                    <a
+                      href="/cleanings"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-t-md"
+                      onClick={() => setShowMaintenanceMenu(false)}
+                    >
+                      Cleanings
+                    </a>
+                    {authService.canAccessProperties(role) && (
+                      <a
+                        href="/cleaners"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600"
+                        onClick={() => setShowMaintenanceMenu(false)}
+                      >
+                        Cleaners
+                      </a>
+                    )}
+                    {authService.canAccessProperties(role) && (
+                      <a
+                        href="/send-cleanings"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600"
+                        onClick={() => setShowMaintenanceMenu(false)}
+                      >
+                        Send Jobs
+                      </a>
+                    )}
+                    {authService.canAccessProperties(role) && (
+                      <a
+                        href="/reports"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-b-md"
+                        onClick={() => setShowMaintenanceMenu(false)}
+                      >
+                        Reports
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
-            {authService.canAccessProperties(role) && (
-              <>
-                <a
-                  href="/cleaners"
-                  className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  Cleaners
-                </a>
-                <a
-                  href="/email-logs"
-                  className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  Email Logs
-                </a>
-              </>
-            )}
-            {role === 'host' && (
+            {/* Reports - Standalone link for cleaners only */}
+            {role === 'cleaner' && (
               <a
-                href="/email-templates"
+                href="/reports"
                 className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
               >
-                Email Templates
+                Reports
               </a>
+            )}
+
+            {/* Email Dropdown Menu - Email Logs and Templates */}
+            {(authService.canAccessProperties(role) || role === 'host') && (
+              <div className="relative" ref={emailMenuRef}>
+                <button
+                  onClick={() => setShowEmailMenu(!showEmailMenu)}
+                  className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium flex items-center"
+                >
+                  Email
+                  <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showEmailMenu ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {showEmailMenu && (
+                  <div className="absolute left-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+                    {authService.canAccessProperties(role) && (
+                      <a
+                        href="/email-logs"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-t-md"
+                        onClick={() => setShowEmailMenu(false)}
+                      >
+                        Email Logs
+                      </a>
+                    )}
+                    {role === 'host' && (
+                      <a
+                        href="/email-templates"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-b-md"
+                        onClick={() => setShowEmailMenu(false)}
+                      >
+                        Email Templates
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </nav>
 

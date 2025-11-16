@@ -24,11 +24,21 @@ export function LoginForm({ onToggleMode, onForgotPassword }: LoginFormProps) {
     setIsLoading(true)
 
     try {
-      await signIn(email, password)
-      // Redirect will happen automatically via auth state change
+      // Add 10 second timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Login timed out. Please try again.')), 10000)
+      )
+      
+      const signInPromise = signIn(email, password)
+      
+      await Promise.race([signInPromise, timeoutPromise])
+      
+      // Force redirect after successful login
+      setTimeout(() => {
+        window.location.href = '/'
+      }, 1000)
     } catch (err: any) {
       setError(err.message || 'Failed to sign in')
-    } finally {
       setIsLoading(false)
     }
   }

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useBookingEmailStatus, useEmailActions } from '@/hooks/use-email-scheduler'
 import { BookingWithProperty } from '@/lib/bookings'
 import { format } from 'date-fns'
+import { emailToLink } from '@/lib/email-utils'
 import { 
   Mail, 
   Clock, 
@@ -266,7 +267,7 @@ export function EmailStatus({ booking, showActions = true }: EmailStatusProps) {
       {booking.contact_email && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <div className="text-sm text-gray-600">
-            <strong>Guest Email:</strong> {booking.contact_email}
+            <strong>Guest Email:</strong> {emailToLink(booking.contact_email)}
           </div>
         </div>
       )}

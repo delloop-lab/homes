@@ -126,6 +126,10 @@ export class GuestCheckinService {
         return { data: null, error: 'Booking not found' }
       }
 
+      const property = Array.isArray(booking.properties) 
+        ? booking.properties[0] 
+        : booking.properties
+
       // Generate the check-in URL
       const baseUrl = process.env.NEXT_PUBLIC_VERCEL_URL 
         ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
@@ -142,7 +146,7 @@ export class GuestCheckinService {
             id: booking.id,
             guest_name: booking.guest_name,
             guest_email: booking.contact_email,
-            property_name: booking.properties.name,
+            property_name: property?.name,
             check_in: booking.check_in,
             check_out: booking.check_out
           }
@@ -192,6 +196,14 @@ export class GuestCheckinService {
         return { data: null, error: 'No check-in token found for this booking' }
       }
 
+      const booking = Array.isArray(existingToken.bookings) 
+        ? existingToken.bookings[0] 
+        : existingToken.bookings
+      const properties = booking?.properties
+      const property = Array.isArray(properties) 
+        ? properties[0] 
+        : (properties as { id: any; name: any } | undefined)
+
       // Generate the check-in URL
       const baseUrl = process.env.NEXT_PUBLIC_VERCEL_URL 
         ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
@@ -208,12 +220,12 @@ export class GuestCheckinService {
           checkin_url: checkinUrl,
           expires_at: existingToken.expires_at,
           booking: {
-            id: existingToken.bookings.id,
-            guest_name: existingToken.bookings.guest_name,
-            guest_email: existingToken.bookings.contact_email,
-            property_name: existingToken.bookings.properties.name,
-            check_in: existingToken.bookings.check_in,
-            check_out: existingToken.bookings.check_out
+            id: booking?.id,
+            guest_name: booking?.guest_name,
+            guest_email: booking?.contact_email,
+            property_name: property?.name,
+            check_in: booking?.check_in,
+            check_out: booking?.check_out
           }
         },
         error: isExpired ? 'Token has expired' : (!existingToken.is_active ? 'Token has been revoked' : null)

@@ -7,6 +7,49 @@ import { Calendar, User, Mail, Phone, DollarSign, Clock, FileText, X, Loader2, U
 import { storageService } from '@/lib/storage'
 import { propertiesService } from '@/lib/properties'
 
+// Currency symbol mapping
+const getCurrencySymbol = (currencyCode?: string): string => {
+  const currencyMap: Record<string, string> = {
+    'USD': '$',
+    'EUR': '€',
+    'GBP': '£',
+    'AUD': 'A$',
+    'CAD': 'C$',
+    'JPY': '¥',
+    'CHF': 'CHF',
+    'CNY': '¥',
+    'INR': '₹',
+    'BRL': 'R$',
+    'MXN': '$',
+    'ZAR': 'R',
+    'NZD': 'NZ$',
+    'SGD': 'S$',
+    'HKD': 'HK$',
+    'SEK': 'kr',
+    'NOK': 'kr',
+    'DKK': 'kr',
+    'PLN': 'zł',
+    'TRY': '₺',
+    'RUB': '₽'
+  }
+  return currencyMap[currencyCode || 'USD'] || currencyCode || '$'
+}
+
+// Helper function to get default currency for a platform
+const getPlatformCurrency = (platform?: string): string => {
+  switch (platform?.toLowerCase()) {
+    case 'vrbo':
+      return 'EUR'
+    case 'airbnb':
+      return 'AUD'
+    case 'booking':
+    case 'booking.com':
+      return 'EUR'
+    default:
+      return 'USD'
+  }
+}
+
 interface BookingFormProps {
   booking?: BookingWithProperty | null
   propertyId?: string
@@ -46,6 +89,7 @@ export function BookingForm({
     check_out: '',
     booking_platform: 'manual',
     total_amount: '',
+    commission_and_charges: '',
     status: 'confirmed' as const,
     notes: '',
     passport_image_url: ''
@@ -129,6 +173,7 @@ export function BookingForm({
         check_out: booking.check_out ? new Date(booking.check_out).toISOString().slice(0, 16) : '',
         booking_platform: booking.booking_platform || 'manual',
         total_amount: booking.total_amount?.toString() || '',
+        commission_and_charges: (booking as any).commission_and_charges?.toString() || '',
         status: booking.status as any,
         notes: booking.notes || '',
         passport_image_url: booking.passport_image_url || ''
@@ -304,6 +349,19 @@ export function BookingForm({
         normalizedAmount = parsed
       }
 
+      // Normalize commission string to a number
+      let normalizedCommission: number | undefined = undefined
+      if (formData.commission_and_charges && formData.commission_and_charges.trim().length > 0) {
+        const cleaned = formData.commission_and_charges
+          .trim()
+          .replace(/[^0-9.,-]/g, '') // remove currency symbols and spaces
+          .replace(/,/g, '') // drop thousand separators
+        const parsed = parseFloat(cleaned)
+        if (!Number.isNaN(parsed)) {
+          normalizedCommission = parsed
+        }
+      }
+
       let result
 
       if (booking) {
@@ -327,6 +385,10 @@ export function BookingForm({
         }
         if (normalizedAmount !== (booking.total_amount || undefined)) {
           updatePayload.total_amount = normalizedAmount
+        }
+        const existingCommission = (booking as any).commission_and_charges || undefined
+        if (normalizedCommission !== existingCommission) {
+          updatePayload.commission_and_charges = normalizedCommission
         }
         if ((formData.passport_image_url || undefined) !== (booking.passport_image_url || undefined)) {
           updatePayload.passport_image_url = formData.passport_image_url || undefined
@@ -372,9 +434,17 @@ export function BookingForm({
         // Only include platform if it changed
         if (formData.booking_platform && formData.booking_platform !== booking.booking_platform) {
           updatePayload.booking_platform = formData.booking_platform
+          // Update currency when platform changes
+          updatePayload.currency = getPlatformCurrency(formData.booking_platform)
           console.log('Platform changed:', booking.booking_platform, '->', formData.booking_platform)
         } else {
           console.log('Platform unchanged:', booking.booking_platform)
+        }
+        
+        // Set currency if it's missing from the booking (for old bookings)
+        if (!(booking as any)?.currency && booking.booking_platform) {
+          updatePayload.currency = getPlatformCurrency(booking.booking_platform)
+          console.log('Setting missing currency based on platform:', updatePayload.currency)
         }
         
         console.log('Update payload:', Object.keys(updatePayload))
@@ -386,9 +456,23 @@ export function BookingForm({
           return
         }
         
+        // Determine currency based on platform
+        const currency = getPlatformCurrency(formData.booking_platform)
+        
         result = await createBooking({
           property_id: formData.property_id,
-          ...baseData
+          guest_name: formData.guest_name.trim(),
+          contact_email: formData.contact_email.trim() || undefined,
+          contact_phone: formData.contact_phone.trim() || undefined,
+          check_in: new Date(formData.check_in),
+          check_out: new Date(formData.check_out),
+          booking_platform: formData.booking_platform,
+          total_amount: normalizedAmount,
+          commission_and_charges: normalizedCommission,
+          status: formData.status,
+          notes: formData.notes.trim() || undefined,
+          passport_image_url: formData.passport_image_url || undefined,
+          currency: currency
         })
       }
 
@@ -709,23 +793,121 @@ export function BookingForm({
               </div>
 
               <div>
-                <label htmlFor="total_amount" className="block text-sm font-medium text-gray-700 mb-2">
-                  <DollarSign className="h-4 w-4 inline mr-1" />
-                  Total Amount
-                </label>
-                <input
-                  id="total_amount"
-                  name="total_amount"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.total_amount}
-                  onChange={handleChange}
-                  disabled={loading}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
-                  placeholder="0.00"
-                />
+                {(() => {
+                  // Determine currency: 
+                  // 1. Use booking currency if it exists
+                  // 2. Otherwise infer from booking's platform (for old bookings without currency)
+                  // 3. Fall back to form's platform (for new bookings)
+                  let currency: string
+                  if (booking) {
+                    currency = (booking as any)?.currency || getPlatformCurrency(booking.booking_platform) || 'USD'
+                  } else {
+                    currency = getPlatformCurrency(formData.booking_platform)
+                  }
+                  const currencySymbol = getCurrencySymbol(currency)
+                  
+                  return (
+                    <>
+                      <label htmlFor="total_amount" className="block text-sm font-medium text-gray-700 mb-2">
+                        <span className="text-gray-700 font-semibold">{currencySymbol}</span> Total Amount ({currency})
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <span className="text-gray-500 text-sm">{currencySymbol}</span>
+                        </div>
+                        <input
+                          id="total_amount"
+                          name="total_amount"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={formData.total_amount}
+                          onChange={handleChange}
+                          disabled={loading}
+                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
+
+              {/* Commission & Charges */}
+              <div>
+                {(() => {
+                  // Determine currency: use booking currency if editing, otherwise use platform default
+                  let currency: string
+                  if (booking) {
+                    currency = (booking as any)?.currency || getPlatformCurrency(booking.booking_platform) || 'USD'
+                  } else {
+                    currency = getPlatformCurrency(formData.booking_platform)
+                  }
+                  const currencySymbol = getCurrencySymbol(currency)
+                  
+                  return (
+                    <>
+                      <label htmlFor="commission_and_charges" className="block text-sm font-medium text-gray-700 mb-2">
+                        <span className="text-gray-700 font-semibold">{currencySymbol}</span> Commission & Charges ({currency})
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <span className="text-gray-500 text-sm">{currencySymbol}</span>
+                        </div>
+                        <input
+                          id="commission_and_charges"
+                          name="commission_and_charges"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={formData.commission_and_charges}
+                          onChange={handleChange}
+                          disabled={loading}
+                          className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </>
+                  )
+                })()}
+              </div>
+
+              {/* Total Payout (Calculated - Read Only) */}
+              {formData.total_amount && (() => {
+                let currency: string
+                if (booking) {
+                  currency = (booking as any)?.currency || getPlatformCurrency(booking.booking_platform) || 'USD'
+                } else {
+                  currency = getPlatformCurrency(formData.booking_platform)
+                }
+                const currencySymbol = getCurrencySymbol(currency)
+                const totalAmount = parseFloat(formData.total_amount) || 0
+                const commission = parseFloat(formData.commission_and_charges) || 0
+                const payout = Math.max(0, totalAmount - commission)
+                
+                return (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <span className="text-gray-700 font-semibold">{currencySymbol}</span> Total Payout ({currency}) <span className="text-xs text-gray-500">(calculated)</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-gray-500 text-sm">{currencySymbol}</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={payout.toFixed(2)}
+                        disabled
+                        readOnly
+                        className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-700 cursor-not-allowed"
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Formula: {currencySymbol}{totalAmount.toFixed(2)} - {currencySymbol}{commission.toFixed(2)} = {currencySymbol}{payout.toFixed(2)}
+                    </p>
+                  </div>
+                )
+              })()}
             </div>
           </div>
 

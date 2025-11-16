@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase'
 import type { Database } from '@/lib/supabase'
+import { convertMultipleCurrencies, convertCurrency } from './currency-converter'
 // Load email scheduler only on the server to avoid bundling Resend in the browser
 async function getEmailScheduler() {
   if (typeof window !== 'undefined') return null
@@ -15,6 +16,7 @@ type Cleaning = Database['public']['Tables']['cleanings']['Insert']
 export interface BookingWithProperty extends Booking {
   property_name?: string
   property_address?: string
+  booking_com_hotel_id?: string | null
 }
 
 export interface CreateBookingData {
@@ -26,9 +28,27 @@ export interface CreateBookingData {
   check_out: Date
   booking_platform?: string
   total_amount?: number
+  commission_and_charges?: number
   status?: 'confirmed' | 'pending' | 'cancelled' | 'checked_in' | 'checked_out'
   notes?: string
   passport_image_url?: string
+  external_reservation_id?: string
+  currency?: string
+}
+
+// Helper function to get default currency for a platform
+function getPlatformCurrency(platform?: string): string {
+  switch (platform?.toLowerCase()) {
+    case 'vrbo':
+      return 'EUR'
+    case 'airbnb':
+      return 'AUD'
+    case 'booking':
+    case 'booking.com':
+      return 'EUR'
+    default:
+      return 'USD'
+  }
 }
 
 export interface UpdateBookingData extends Partial<CreateBookingData> {
@@ -116,16 +136,29 @@ export class BookingService {
     try {
       const supabase = this.getSupabaseClient()
 
-      let query = supabase
+      // First, count the bookings to be deleted
+      let countQuery = supabase
+        .from('bookings')
+        .select('id', { count: 'exact', head: true })
+        .eq('booking_platform', platform)
+
+      if (propertyId) {
+        countQuery = countQuery.eq('property_id', propertyId)
+      }
+
+      const { count } = await countQuery
+
+      // Then delete them
+      let deleteQuery = supabase
         .from('bookings')
         .delete()
         .eq('booking_platform', platform)
 
       if (propertyId) {
-        query = query.eq('property_id', propertyId)
+        deleteQuery = deleteQuery.eq('property_id', propertyId)
       }
 
-      const { error, count } = await query.select('id', { count: 'exact' })
+      const { error } = await deleteQuery
       if (error) {
         return { success: false, error: error.message }
       }
@@ -157,6 +190,8 @@ export class BookingService {
       })
 
       const { data, error } = await Promise.race([queryPromise, timeoutPromise])
+      
+      console.log('getBooking result for', id, '- commission_and_charges:', (data as any)?.commission_and_charges)
 
       if (error) {
         // If view fails, try direct bookings table
@@ -166,6 +201,8 @@ export class BookingService {
             .select('*')
             .eq('id', id)
             .single()
+          
+          console.log('getBooking direct query - commission_and_charges:', (directQuery.data as any)?.commission_and_charges)
           
           if (directQuery.error) {
             console.error('Error fetching booking:', directQuery.error)
@@ -219,6 +256,9 @@ export class BookingService {
         return { data: null, error: `Booking overlaps with existing reservation: ${overlapCheck.conflictingBooking?.guest_name}` }
       }
 
+      // Determine currency: use provided currency, or default based on platform
+      const currency = bookingData.currency || getPlatformCurrency(bookingData.booking_platform)
+
       // Prepare booking data for insert
       const insertData: BookingInsert = {
         property_id: bookingData.property_id,
@@ -229,9 +269,17 @@ export class BookingService {
         check_out: bookingData.check_out.toISOString(),
         booking_platform: bookingData.booking_platform || 'manual',
         total_amount: bookingData.total_amount,
+        commission_and_charges: bookingData.commission_and_charges !== undefined 
+          ? (typeof bookingData.commission_and_charges === 'number' 
+              ? bookingData.commission_and_charges 
+              : parseFloat(String(bookingData.commission_and_charges)) || 0)
+          : undefined,
         status: bookingData.status || 'confirmed',
         notes: bookingData.notes,
-        passport_image_url: bookingData.passport_image_url
+        passport_image_url: bookingData.passport_image_url,
+        // Persist external reservation id if provided (e.g., Booking.com res_id)
+        external_reservation_id: bookingData.external_reservation_id,
+        currency: currency
       }
 
       const { data, error } = await supabase
@@ -390,10 +438,39 @@ export class BookingService {
         ...(updateData.check_out && { check_out: updateData.check_out.toISOString() }),
         ...(updateData.booking_platform !== undefined && { booking_platform: updateData.booking_platform }),
         ...(updateData.total_amount !== undefined && { total_amount: updateData.total_amount }),
+        ...(updateData.commission_and_charges !== undefined && { 
+          commission_and_charges: typeof updateData.commission_and_charges === 'number' 
+            ? updateData.commission_and_charges 
+            : parseFloat(String(updateData.commission_and_charges)) || 0
+        }),
         ...(updateData.status !== undefined && { status: updateData.status }),
         ...(updateData.notes !== undefined && { notes: updateData.notes }),
-        ...(updateData.passport_image_url !== undefined && { passport_image_url: updateData.passport_image_url })
+        ...(updateData.passport_image_url !== undefined && { passport_image_url: updateData.passport_image_url }),
+        // Allow updating external reservation id used for platform links
+        ...((updateData as any).external_reservation_id !== undefined && { external_reservation_id: (updateData as any).external_reservation_id })
       }
+
+      // If nothing selected (due to type filtering), but caller explicitly passed certain fields, force-include them
+      if (Object.keys(updateFields).length === 0) {
+        const forced: any = {}
+        if ((updateData as any).passport_image_url !== undefined) {
+          forced.passport_image_url = (updateData as any).passport_image_url
+        }
+        if ((updateData as any).commission_and_charges !== undefined) {
+          forced.commission_and_charges = (updateData as any).commission_and_charges
+        }
+        if (Object.keys(forced).length > 0) {
+          Object.assign(updateFields as any, forced)
+        }
+      }
+
+      // If no fields to update, short-circuit to avoid empty update that can hang/time out
+      if (Object.keys(updateFields).length === 0) {
+        console.log('No changes detected in update payload; skipping update for booking:', updateData.id)
+        return { data: { id: updateData.id } as any, error: null }
+      }
+      
+      console.log('Final updateFields being sent to DB:', updateFields)
 
       // Update with timeout - use longer timeout (database triggers may be slow)
       // Simple updates still trigger overlap checks, so they can be slow
@@ -403,40 +480,33 @@ export class BookingService {
       let error: any = null
       
       if (isSimpleUpdate) {
-        // For simple updates, use a reasonable timeout but actually wait for completion
-        // The database trigger is now optimized to skip overlap checks when dates don't change
-        console.log('Executing simple update with timeout')
-        
-        const updatePromise = supabase
-          .from('bookings')
-          .update(updateFields)
-          .eq('id', updateData.id)
-        
-        const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) => {
-          setTimeout(() => {
-            resolve({ error: { message: `Update request timed out after ${timeoutMs}ms` } })
-          }, timeoutMs)
-        })
+        // For simple updates, get the data back immediately to confirm it saved
+        console.log('Executing simple update - fields:', Object.keys(updateFields))
         
         try {
-          const result = await Promise.race([updatePromise, timeoutPromise])
+          const { data: updateResult, error: updateError } = await supabase
+            .from('bookings')
+            .update(updateFields)
+            .eq('id', updateData.id)
+            .select()
+            .single()
           
-          if ('error' in result && result.error) {
-            error = result.error
-            console.error('Update error:', result.error)
+          if (updateError) {
+            console.error('Update error from database:', updateError)
+            console.error('Update fields that failed:', updateFields)
+            error = updateError.message
+            data = null
           } else {
-            // Update succeeded, construct response from updateData
-            // For simple updates, we don't have currentBooking, so just return what we updated
-            data = {
-              id: updateData.id,
-              ...updateFields,
-              updated_at: new Date().toISOString()
-            }
-            console.log('Simple update succeeded')
+            console.log('Simple update succeeded, data returned:', updateResult)
+            console.log('Returned commission_and_charges:', (updateResult as any)?.commission_and_charges, 'type:', typeof (updateResult as any)?.commission_and_charges)
+            console.log('Sent commission_and_charges:', updateFields.commission_and_charges, 'type:', typeof updateFields.commission_and_charges)
+            data = updateResult
+            error = null
           }
         } catch (err: any) {
           console.error('Update exception:', err)
-          error = { message: err.message || 'Update failed' }
+          error = err.message || String(err)
+          data = null
         }
       } else {
         // For complex updates, select the full record
@@ -571,6 +641,7 @@ export class BookingService {
 
   /**
    * Schedule cleaning task after checkout
+   * Takes into account property timezone and typical checkout time (10:00 AM)
    */
   private async schedulePostCheckoutCleaning(
     bookingId: string,
@@ -580,8 +651,75 @@ export class BookingService {
     try {
       const supabase = this.getSupabaseClient()
 
-      // Schedule cleaning 2-4 hours after checkout (default 3 hours)
-      const cleaningDate = new Date(checkoutDate.getTime() + 3 * 60 * 60 * 1000)
+      // Fetch property to get timezone (default to UTC if not set)
+      const { data: property } = await supabase
+        .from('properties')
+        .select('timezone')
+        .eq('id', propertyId)
+        .maybeSingle()
+      
+      const propertyTimezone = (property as any)?.timezone || 'UTC'
+
+      // Get checkout date/time components in property's timezone
+      // Checkout is typically at 10:00 AM, so schedule cleaning at 10:00 AM same day
+      const checkoutDateStr = checkoutDate.toLocaleString('en-US', { 
+        timeZone: propertyTimezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      })
+      
+      // Parse: "MM/DD/YYYY, HH:MM"
+      const [datePart, timePart] = checkoutDateStr.split(', ')
+      const [month, day, year] = datePart.split('/')
+      const [hour, minute] = timePart.split(':')
+      const checkoutHour = parseInt(hour, 10)
+
+      // Create cleaning date: 10:00 AM on checkout date in property timezone
+      // Format: "YYYY-MM-DDTHH:MM:SS" in property timezone, then convert to Date
+      const cleaningDateStr = checkoutHour >= 14
+        ? // If checkout is 2 PM or later, schedule for next day at 10 AM
+          (() => {
+            const nextDay = new Date(checkoutDate)
+            nextDay.setDate(nextDay.getDate() + 1)
+            const nextDayStr = nextDay.toLocaleString('en-US', { 
+              timeZone: propertyTimezone,
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit'
+            })
+            const [nextMonth, nextDayNum, nextYear] = nextDayStr.split('/')
+            return `${nextYear}-${nextMonth}-${nextDayNum}T10:00:00`
+          })()
+        : // Same day at 10 AM
+          `${year}-${month}-${day}T10:00:00`
+      
+      // Create date in property timezone, then convert to UTC for storage
+      // We'll create a date string that represents 10 AM in the property timezone
+      const cleaningDateLocal = new Date(`${cleaningDateStr} GMT${propertyTimezone === 'UTC' ? '+0000' : ''}`)
+      
+      // Better approach: use Intl.DateTimeFormat to create date in property timezone
+      const cleaningDate = new Date()
+      const [cleanYear, cleanMonth, cleanDay] = cleaningDateStr.split('T')[0].split('-')
+      cleaningDate.setFullYear(parseInt(cleanYear, 10), parseInt(cleanMonth, 10) - 1, parseInt(cleanDay, 10))
+      cleaningDate.setHours(10, 0, 0, 0)
+      
+      // Convert 10 AM in property timezone to UTC
+      // Get the offset difference between property timezone and UTC
+      const propertyTime = new Date(cleaningDate.toLocaleString('en-US', { timeZone: propertyTimezone }))
+      const utcTime = new Date(cleaningDate.toLocaleString('en-US', { timeZone: 'UTC' }))
+      const offsetMs = propertyTime.getTime() - utcTime.getTime()
+      cleaningDate.setTime(cleaningDate.getTime() - offsetMs)
+      
+      // If 10 AM has already passed in property timezone, schedule for next day
+      const nowInPropertyTz = new Date(new Date().toLocaleString('en-US', { timeZone: propertyTimezone }))
+      const cleaningInPropertyTz = new Date(cleaningDate.toLocaleString('en-US', { timeZone: propertyTimezone }))
+      if (cleaningInPropertyTz < nowInPropertyTz && checkoutHour < 14) {
+        cleaningDate.setDate(cleaningDate.getDate() + 1)
+      }
 
       // Check if cleaning already exists for this time slot
       const { data: existingCleaning } = await supabase
@@ -610,7 +748,7 @@ export class BookingService {
         property_id: propertyId,
         cleaning_date: cleaningDate.toISOString(),
         status: 'scheduled',
-        notes: `Post-checkout cleaning for booking ${bookingId}`,
+        notes: `Post-checkout cleaning`,
         cost: defaultCost
       }
 
@@ -718,7 +856,7 @@ export class BookingService {
   /**
    * Get booking statistics
    */
-  async getBookingStats(propertyId?: string): Promise<{
+  async getBookingStats(propertyId?: string, targetCurrency?: string): Promise<{
     total: number
     confirmed: number
     pending: number
@@ -726,14 +864,24 @@ export class BookingService {
     checkedIn: number
     checkedOut: number
     totalRevenue: number
+    totalRevenueConverted: number
     averageNights: number
+    revenueByCurrency: Record<string, number>
+    bookingBreakdown?: Array<{
+      guest_name?: string
+      check_in?: string
+      total_amount: number
+      commission: number
+      payout: number
+      currency: string
+    }>
   }> {
     try {
       const supabase = this.getSupabaseClient()
 
       let query = supabase
         .from('bookings_with_properties')
-        .select('status, total_amount, nights')
+        .select('status, total_amount, commission_and_charges, nights, currency, guest_name, check_in')
 
       if (propertyId) {
         query = query.eq('property_id', propertyId)
@@ -744,30 +892,171 @@ export class BookingService {
       if (error || !data) {
         return {
           total: 0, confirmed: 0, pending: 0, cancelled: 0,
-          checkedIn: 0, checkedOut: 0, totalRevenue: 0, averageNights: 0
+          checkedIn: 0, checkedOut: 0, totalRevenue: 0, totalRevenueConverted: 0,
+          averageNights: 0, revenueByCurrency: {}
         }
       }
+
+      const revenueByCurrency: Record<string, number> = {}
+      const bookingDetails: Array<{
+        guest_name?: string
+        check_in?: string
+        total_amount: number
+        commission: number
+        payout: number
+        currency: string
+      }> = []
 
       const stats = data.reduce((acc, booking) => {
         acc.total++
         acc[booking.status as keyof typeof acc] = (acc[booking.status as keyof typeof acc] as number) + 1
-        acc.totalRevenue += booking.total_amount || 0
+        const total = booking.total_amount || 0
+        const commission = (booking as any).commission_and_charges || 0
+        const payout = Math.max(0, total - commission)
+        acc.totalRevenue += payout
         acc.averageNights += booking.nights || 0
+        
+        // Group revenue by currency
+        const currency = (booking as any).currency || 'USD'
+        if (!revenueByCurrency[currency]) {
+          revenueByCurrency[currency] = 0
+        }
+        revenueByCurrency[currency] += payout
+        
+        // Store booking details for logging
+        bookingDetails.push({
+          guest_name: (booking as any).guest_name,
+          check_in: (booking as any).check_in,
+          total_amount: total,
+          commission: commission,
+          payout: payout,
+          currency: currency
+        })
+        
         return acc
       }, {
         total: 0, confirmed: 0, pending: 0, cancelled: 0,
         checkedIn: 0, checkedOut: 0, totalRevenue: 0, averageNights: 0
       })
 
+      // Log detailed breakdown for debugging
+      console.log('=== BOOKING REVENUE CALCULATION BREAKDOWN ===')
+      console.log(`Total Bookings: ${stats.total}`)
+      console.log('\nIndividual Booking Payouts:')
+      let runningTotal = 0
+      bookingDetails.forEach((booking, index) => {
+        runningTotal += booking.payout
+        console.log(`${index + 1}. Guest: ${booking.guest_name || 'N/A'}, Check-in: ${booking.check_in || 'N/A'}`)
+        console.log(`   Total Amount: ${booking.currency} ${booking.total_amount.toFixed(2)}`)
+        console.log(`   Commission: ${booking.currency} ${booking.commission.toFixed(2)}`)
+        console.log(`   Payout: ${booking.currency} ${booking.payout.toFixed(2)}`)
+        console.log(`   Running Total: ${booking.currency} ${runningTotal.toFixed(2)}`)
+        console.log('')
+      })
+      console.log(`\n=== FINAL TOTALS ===`)
+      console.log(`Total Revenue (sum of all payouts): ${stats.totalRevenue.toFixed(2)}`)
+      console.log(`Revenue by Currency:`, revenueByCurrency)
+      console.log('==========================================\n')
+
       stats.averageNights = stats.total > 0 ? stats.averageNights / stats.total : 0
 
-      return stats
+      // Calculate total revenue converted to target currency
+      let totalRevenueConverted = stats.totalRevenue
+      const convertedRevenueByCurrency: Record<string, number> = {}
+      
+      console.log('\n=== CONVERSION LOGIC ===')
+      console.log(`Target Currency: ${targetCurrency}`)
+      console.log(`Original Total Revenue: ${stats.totalRevenue.toFixed(2)}`)
+      console.log(`Revenue by Currency (original):`, revenueByCurrency)
+      
+      if (targetCurrency && Object.keys(revenueByCurrency).length > 0) {
+        // Check if all currencies match target currency - if so, no conversion needed
+        const currencies = Object.keys(revenueByCurrency).filter(c => revenueByCurrency[c] !== 0)
+        const allMatchTarget = currencies.length > 0 && currencies.every(c => c.toUpperCase() === targetCurrency.toUpperCase())
+        
+        console.log(`Currencies with non-zero amounts:`, currencies)
+        console.log(`All match target (${targetCurrency})?`, allMatchTarget)
+        
+        if (allMatchTarget) {
+          // All bookings are in target currency - just sum them directly (no conversion)
+          console.log('✓ All currencies match target - NO CONVERSION NEEDED')
+          totalRevenueConverted = stats.totalRevenue
+          Object.assign(convertedRevenueByCurrency, revenueByCurrency)
+          console.log(`Final Total Revenue (no conversion): ${totalRevenueConverted.toFixed(2)}`)
+        } else {
+          console.log('⚠ Mixed currencies - CONVERSION REQUIRED')
+          // Mixed currencies - need to convert
+          try {
+            // Convert total
+            const conversionPromise = convertMultipleCurrencies(
+              revenueByCurrency,
+              targetCurrency
+            )
+            const timeoutPromise = new Promise<number>((resolve) => {
+              setTimeout(() => resolve(stats.totalRevenue), 3000) // 3 second timeout
+            })
+            
+            totalRevenueConverted = await Promise.race([conversionPromise, timeoutPromise])
+            console.log(`Converted Total Revenue: ${totalRevenueConverted.toFixed(2)}`)
+            console.log(`Difference from original: ${(totalRevenueConverted - stats.totalRevenue).toFixed(2)}`)
+            
+            // Convert each currency amount to target currency for breakdown
+            for (const [currency, amount] of Object.entries(revenueByCurrency)) {
+              if (amount === 0) {
+                convertedRevenueByCurrency[currency] = 0
+                continue
+              }
+              
+              // If currency matches target, no conversion needed
+              if (currency.toUpperCase() === targetCurrency.toUpperCase()) {
+                convertedRevenueByCurrency[currency] = amount
+                continue
+              }
+              
+              try {
+                // Convert with timeout to prevent hanging
+                const convertPromise = convertCurrency(amount, currency, targetCurrency)
+                const timeoutPromise = new Promise<number>((resolve) => {
+                  setTimeout(() => resolve(amount), 2000) // 2 second timeout per currency
+                })
+                const converted = await Promise.race([convertPromise, timeoutPromise])
+                convertedRevenueByCurrency[currency] = converted
+              } catch (err) {
+                // Fallback to original amount if conversion fails
+                convertedRevenueByCurrency[currency] = amount
+              }
+            }
+          } catch (error) {
+            console.error('Currency conversion error:', error)
+            // Fallback to original total if conversion fails
+            totalRevenueConverted = stats.totalRevenue
+            Object.assign(convertedRevenueByCurrency, revenueByCurrency)
+          }
+        }
+      } else {
+        // No target currency, use original amounts
+        Object.assign(convertedRevenueByCurrency, revenueByCurrency)
+      }
+
+      console.log('\n=== RETURNING STATS ===')
+      console.log(`totalRevenue: ${stats.totalRevenue.toFixed(2)}`)
+      console.log(`totalRevenueConverted: ${totalRevenueConverted.toFixed(2)}`)
+      console.log(`revenueByCurrency (converted):`, convertedRevenueByCurrency)
+      console.log('========================\n')
+
+      return {
+        ...stats,
+        totalRevenueConverted,
+        revenueByCurrency: convertedRevenueByCurrency,
+        bookingBreakdown: bookingDetails
+      }
 
     } catch (error) {
       console.error('Booking stats error:', error)
       return {
         total: 0, confirmed: 0, pending: 0, cancelled: 0,
-        checkedIn: 0, checkedOut: 0, totalRevenue: 0, averageNights: 0
+        checkedIn: 0, checkedOut: 0, totalRevenue: 0, totalRevenueConverted: 0,
+        averageNights: 0, revenueByCurrency: {}
       }
     }
   }

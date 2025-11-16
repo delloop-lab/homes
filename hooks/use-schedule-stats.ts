@@ -54,9 +54,8 @@ export function useScheduleStats(options: UseScheduleStatsOptions = {}) {
 
   // Fetch bookings for current and next week
   const { bookings, loading, error } = useBookings({
-    from: subDays(weekStart, 7).toISOString(), // Include previous week for context
-    to: addDays(nextWeekEnd, 7).toISOString(), // Include week after next for context
-    includeInactive
+    date_from: subDays(weekStart, 7), // Include previous week for context
+    date_to: addDays(nextWeekEnd, 7), // Include week after next for context
   })
 
   const stats = useMemo((): ScheduleStats => {
@@ -234,9 +233,8 @@ export function usePropertyActivity(date: Date = new Date()) {
   const weekEnd = addDays(weekStart, 13) // 2 weeks
 
   const { bookings, loading, error } = useBookings({
-    from: weekStart.toISOString(),
-    to: weekEnd.toISOString(),
-    includeInactive: false
+    date_from: weekStart,
+    date_to: weekEnd,
   })
 
   const propertyActivity = useMemo(() => {

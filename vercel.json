@@ -13,12 +13,7 @@
   "crons": [
     {
       "path": "/api/process-emails",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 9 * * *"
     }
-  ],
-  "env": {
-    "RESEND_API_KEY": "@resend_api_key",
-    "FROM_EMAIL": "@from_email",
-    "CRON_SECRET": "@cron_secret"
-  }
+  ]
 }

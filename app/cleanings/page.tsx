@@ -85,18 +85,18 @@ function CleaningStats() {
 }
 
 export default function CleaningsPage() {
-  const { userRole } = useAuth()
+  const { role } = useAuth()
   const router = useRouter()
 
   // Redirect cleaners to the mobile-optimized schedule
   useEffect(() => {
-    if (userRole === 'cleaner') {
+    if (role === 'cleaner') {
       router.push('/cleaner-schedule')
     }
-  }, [userRole, router])
+  }, [role, router])
 
   // Show loading while redirecting cleaners
-  if (userRole === 'cleaner') {
+  if (role === 'cleaner') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">

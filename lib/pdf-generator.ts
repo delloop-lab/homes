@@ -203,7 +203,8 @@ export class PDFGenerator {
       this.currentY += 3
 
       if (booking.booking_platform) {
-        this.doc.text(`Platform: ${booking.booking_platform}`, this.margin + 10, this.currentY)
+        const { formatPlatformName } = require('./booking-platforms')
+        this.doc.text(`Platform: ${formatPlatformName(booking.booking_platform)}`, this.margin + 10, this.currentY)
         this.currentY += 3
       }
 
@@ -470,7 +471,10 @@ export class PDFGenerator {
       `Check-out: ${format(checkOutDate, 'EEEE, MMMM dd, yyyy \'at\' h:mm a')}`,
       `Duration: ${nights} night${nights !== 1 ? 's' : ''}`,
       `Status: ${booking.status?.toUpperCase() || 'CONFIRMED'}`,
-      ...(booking.booking_platform ? [`Platform: ${booking.booking_platform}`] : []),
+      ...(booking.booking_platform ? (() => {
+        const { formatPlatformName } = require('./booking-platforms')
+        return [`Platform: ${formatPlatformName(booking.booking_platform)}`]
+      })() : []),
       ...(booking.total_amount ? [`Total Amount: $${booking.total_amount.toLocaleString()}`] : [])
     ]
 

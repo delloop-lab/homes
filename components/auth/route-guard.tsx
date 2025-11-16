@@ -41,7 +41,10 @@ export function RouteGuard({
     }
 
     // Wait for role to resolve before enforcing role-based redirects
+    // But don't wait forever - if we have user metadata, use that
     if (requireAuth && user && requiredRole && role === null) {
+      // Give it a moment, but don't block indefinitely
+      // The auth provider will set role from metadata quickly
       return
     }
 

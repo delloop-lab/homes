@@ -15,10 +15,17 @@ export default function AuthPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
 
-  // Redirect authenticated users
+  // Redirect authenticated users based on role
   useEffect(() => {
     if (!loading && user) {
-      router.push('/')
+      // Get role from user metadata or profile
+      const userRole = (user as any)?.user_metadata?.role
+      // Use replace to avoid adding to history
+      if (userRole === 'cleaner') {
+        router.replace('/cleaner-dashboard')
+      } else {
+        router.replace('/')
+      }
     }
   }, [user, loading, router])
 
@@ -44,7 +51,7 @@ export default function AuthPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Rental Host Platform
+            My Guests
           </h1>
           <p className="text-gray-600">
             Manage your short-term rental properties with ease

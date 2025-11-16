@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { cleaningService, CreateCleaningData, UpdateCleaningData, CleaningWithProperty } from '@/lib/cleanings'
 
 interface UseCleaningsOptions {
@@ -28,7 +28,7 @@ export function useCleanings(options: UseCleaningsOptions = {}): UseCleaningsRet
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [count, setCount] = useState(0)
-  const [offset, setOffset] = useState(0)
+  const offsetRef = useRef(0)
   const limit = options.limit || 20
 
   const fetchCleanings = useCallback(async (reset = false) => {
@@ -36,7 +36,7 @@ export function useCleanings(options: UseCleaningsOptions = {}): UseCleaningsRet
       setLoading(true)
       setError(null)
 
-      const currentOffset = reset ? 0 : offset
+      const currentOffset = reset ? 0 : offsetRef.current
       const result = await cleaningService.getCleanings({
         ...options,
         limit,
@@ -50,10 +50,10 @@ export function useCleanings(options: UseCleaningsOptions = {}): UseCleaningsRet
 
       if (reset) {
         setCleanings(result.data)
-        setOffset(limit)
+        offsetRef.current = limit
       } else {
         setCleanings(prev => [...prev, ...result.data])
-        setOffset(prev => prev + limit)
+        offsetRef.current = offsetRef.current + limit
       }
 
       setCount(result.count || 0)
@@ -63,7 +63,14 @@ export function useCleanings(options: UseCleaningsOptions = {}): UseCleaningsRet
     } finally {
       setLoading(false)
     }
-  }, [options.property_id, options.status, options.date_from, options.date_to, options.cleaner_id, limit, offset])
+  }, [
+    options.property_id,
+    options.status,
+    options.date_from ? options.date_from.toISOString() : undefined,
+    options.date_to ? options.date_to.toISOString() : undefined,
+    options.cleaner_id,
+    limit
+  ])
 
   const refetch = useCallback(() => fetchCleanings(true), [fetchCleanings])
 
@@ -71,9 +78,33 @@ export function useCleanings(options: UseCleaningsOptions = {}): UseCleaningsRet
 
   const hasMore = cleanings.length < count
 
+  // Track previous filter values to detect changes
+  const prevFiltersRef = useRef<string>('')
+  
   useEffect(() => {
-    fetchCleanings(true)
-  }, [options.property_id, options.status, options.date_from, options.date_to, options.cleaner_id])
+    // Create a stable key from filter values
+    const filterKey = JSON.stringify({
+      property_id: options.property_id,
+      status: options.status,
+      date_from: options.date_from ? options.date_from.toISOString() : undefined,
+      date_to: options.date_to ? options.date_to.toISOString() : undefined,
+      cleaner_id: options.cleaner_id,
+    })
+    
+    // Only refetch if filters actually changed
+    if (prevFiltersRef.current !== filterKey) {
+      prevFiltersRef.current = filterKey
+      offsetRef.current = 0
+      fetchCleanings(true)
+    }
+  }, [
+    options.property_id,
+    options.status,
+    options.date_from ? options.date_from.toISOString() : undefined,
+    options.date_to ? options.date_to.toISOString() : undefined,
+    options.cleaner_id,
+    // Removed fetchCleanings to prevent infinite loops
+  ])
 
   // Auto refresh every 30 seconds if enabled
   useEffect(() => {

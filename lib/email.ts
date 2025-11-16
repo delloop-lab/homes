@@ -1,9 +1,16 @@
 import { Resend } from 'resend'
 import { createClient } from '@/lib/supabase'
 
-// Initialize Resend client
+// Initialize Resend client lazily
 const RESEND_KEY = process.env.RESEND_API_KEY || process.env.NEXT_PUBLIC_RESEND_API_KEY
-const resend = new Resend(RESEND_KEY)
+let resend: Resend | null = null
+
+function getResendClient(): Resend | null {
+  if (!resend && RESEND_KEY) {
+    resend = new Resend(RESEND_KEY)
+  }
+  return resend
+}
 
 export interface EmailRecipient {
   email: string
@@ -81,7 +88,7 @@ export class EmailService {
         return { success: false, error: 'FROM_EMAIL not configured' }
       }
 
-      const emailData = {
+      const emailData: any = {
         from: fromAddress,
         to: [options.to.email],
         subject: options.subject,
@@ -90,7 +97,12 @@ export class EmailService {
         tags: options.tags || []
       }
 
-      const result = await resend.emails.send(emailData)
+      const client = getResendClient()
+      if (!client) {
+        return { success: false, error: 'Email service not configured' }
+      }
+
+      const result = await client.emails.send(emailData)
 
       if (result.error) {
         console.error('Email send error:', result.error)

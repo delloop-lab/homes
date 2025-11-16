@@ -29,6 +29,7 @@ export default function SendCleaningsPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [editingNotes, setEditingNotes] = useState<Record<string, string>>({})
+  const [justSentIds, setJustSentIds] = useState<Set<string>>(new Set())
 
   const { cleanings, loading, refetch } = useCleanings({
     status: 'scheduled',
@@ -123,6 +124,8 @@ export default function SendCleaningsPage() {
 
       if (result.success) {
         setSuccess(`Successfully sent ${selectedCleanings.size} cleaning job(s) to ${selectedCleaner.full_name}`)
+        // Mark sent items in UI immediately
+        setJustSentIds(new Set(Array.from(selectedCleanings)))
         setSelectedCleanings(new Set())
         setEditingNotes({})
         refetch()
@@ -280,6 +283,12 @@ export default function SendCleaningsPage() {
                                 <Calendar className="h-4 w-4 mr-1" />
                                 {format(new Date(cleaning.cleaning_date), 'MMM dd, yyyy h:mm a')}
                               </div>
+                  {justSentIds.has(cleaning.id) && (
+                    <div className="mt-1 inline-flex items-center text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded px-2 py-0.5">
+                      <Mail className="h-3 w-3 mr-1" />
+                      Sent just now
+                    </div>
+                  )}
                               {cleaning.cost && (
                                 <div className="text-sm font-medium text-gray-900">
                                   ${cleaning.cost.toFixed(2)}

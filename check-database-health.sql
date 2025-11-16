@@ -77,3 +77,5 @@ SELECT 'HEALTH SUMMARY' as status,
        END as schema_status,
        '✓ Database responding' as connection_status;
 
+
+

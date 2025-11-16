@@ -70,7 +70,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (booking.properties.host_id !== user.id) {
+    const property = Array.isArray(booking.properties) ? booking.properties[0] : booking.properties
+    if (!property || property.host_id !== user.id) {
       return NextResponse.json(
         { error: 'You can only generate tokens for your own bookings' },
         { status: 403 }
@@ -126,7 +127,7 @@ export async function POST(request: NextRequest) {
           id: booking.id,
           guest_name: booking.guest_name,
           guest_email: booking.contact_email,
-          property_name: booking.properties.name,
+          property_name: property.name,
           check_in: booking.check_in,
           check_out: booking.check_out
         }
@@ -205,7 +206,20 @@ export async function GET(request: NextRequest) {
     }
 
     // Verify host owns this booking
-    if (existingToken.bookings.properties.host_id !== user.id) {
+    const existingBooking = Array.isArray(existingToken.bookings) 
+      ? existingToken.bookings[0] 
+      : existingToken.bookings
+    if (!existingBooking) {
+      return NextResponse.json(
+        { error: 'Booking not found' },
+        { status: 404 }
+      )
+    }
+    const properties = existingBooking.properties
+    const existingProperty = Array.isArray(properties) 
+      ? properties[0] 
+      : (properties as { id: any; name: any; host_id: any } | undefined)
+    if (!existingProperty || existingProperty.host_id !== user.id) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
@@ -234,9 +248,9 @@ export async function GET(request: NextRequest) {
         access_count: existingToken.access_count,
         last_accessed: existingToken.accessed_at,
         booking: {
-          guest_name: existingToken.bookings.guest_name,
-          guest_email: existingToken.bookings.contact_email,
-          property_name: existingToken.bookings.properties.name
+          guest_name: existingBooking?.guest_name,
+          guest_email: existingBooking?.contact_email,
+          property_name: existingProperty.name
         }
       }
     })

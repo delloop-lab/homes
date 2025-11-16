@@ -94,9 +94,13 @@ export type Database = {
           event_uid: string | null
           booking_platform: string
           reservation_url: string | null
+          external_hotel_id: string | null
+          external_reservation_id: string | null
           guest_phone_last4: string | null
           listing_name: string | null
           total_amount: number | null
+          commission_and_charges: number | null
+          currency: string | null
           status: 'confirmed' | 'pending' | 'cancelled' | 'checked_in' | 'checked_out'
           created_at: string
           updated_at: string
@@ -116,9 +120,13 @@ export type Database = {
           event_uid?: string | null
           booking_platform?: string
           reservation_url?: string | null
+          external_hotel_id?: string | null
+          external_reservation_id?: string | null
           guest_phone_last4?: string | null
           listing_name?: string | null
           total_amount?: number | null
+          commission_and_charges?: number | null
+          currency?: string | null
           status?: 'confirmed' | 'pending' | 'cancelled' | 'checked_in' | 'checked_out'
           created_at?: string
           updated_at?: string
@@ -138,9 +146,13 @@ export type Database = {
           event_uid?: string | null
           booking_platform?: string
           reservation_url?: string | null
+          external_hotel_id?: string | null
+          external_reservation_id?: string | null
           guest_phone_last4?: string | null
           listing_name?: string | null
           total_amount?: number | null
+          commission_and_charges?: number | null
+          currency?: string | null
           status?: 'confirmed' | 'pending' | 'cancelled' | 'checked_in' | 'checked_out'
           created_at?: string
           updated_at?: string
