@@ -45,49 +45,48 @@ function ResetPasswordContent() {
       }
     })
 
-    // Also check for code in URL and exchange it
-    const validateResetLink = async () => {
-      if (!mounted) return
-
-      // Helper to parse hash params
-      const getHashParams = (): URLSearchParams | null => {
-        if (typeof window === 'undefined') return null
-        if (!window.location.hash) return null
-        try {
-          return new URLSearchParams(window.location.hash.substring(1))
-        } catch (e) {
-          return null
+    // Check for code in URL and exchange it
+    const code = searchParams.get('code')
+    
+    if (code) {
+      console.log('✅ Recovery code found, exchanging...')
+      try {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        
+        if (error) {
+          console.error('❌ Code exchange error:', error.message)
+          if (mounted) {
+            setValidationError(error.message || 'Invalid reset code')
+            setIsValidating(false)
+          }
+          return
         }
-      }
-
-      // Helper to get all query params
-      const getAllQueryParams = (): URLSearchParams => {
-        if (typeof window === 'undefined') return new URLSearchParams()
-        try {
-          return new URLSearchParams(window.location.search)
-        } catch (e) {
-          return new URLSearchParams()
+        
+        if (data?.session) {
+          console.log('✅ Code exchanged, session created')
+          if (mounted) {
+            setIsValidating(false)
+          }
         }
-      }
-
-      // Add timeout to prevent hanging
-      const timeoutId = setTimeout(() => {
-        if (mounted && !timeoutCleared) {
-          console.error('Password reset validation timed out')
-          setValidationError('Reset link validation timed out. Please try requesting a new password reset.')
+      } catch (err: any) {
+        console.error('❌ Code exchange exception:', err)
+        if (mounted) {
+          setValidationError('Failed to validate reset code')
           setIsValidating(false)
         }
-      }, 20000) // 20 second timeout
-      
-      const clearTimeoutSafe = () => {
-        timeoutCleared = true
-        clearTimeout(timeoutId)
       }
-      
-      try {
-        // Check immediately first (before any delay)
-        let queryParams = getAllQueryParams()
-        let hashParams = getHashParams()
+    } else {
+      // No code - wait for PASSWORD_RECOVERY event (handled by onAuthStateChange above)
+      console.log('⏳ No code in URL, waiting for auth state change...')
+    }
+    
+    // Cleanup function
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
         let codeFromQuery = queryParams.get('code')
         let codeFromHash = hashParams?.get('code')
         let tokenFromQuery = queryParams.get('token')
