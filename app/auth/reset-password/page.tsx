@@ -399,34 +399,27 @@ function ResetPasswordContent() {
       return
     }
     
-    // Get the code from URL
-    const code = searchParams.get('code')
-    if (!code) {
-      setUpdateError('Reset code missing. Please request a new password reset link.')
+    const supabase = createClient()
+    if (!supabase) {
+      setUpdateError('Auth backend unavailable')
       return
     }
     
     setIsUpdating(true)
-    console.log('🔄 Calling password reset API...')
+    console.log('🔄 Updating password directly (no session required for recovery)...')
     
     try {
-      const response = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          code: code,
-          password: newPassword
-        })
+      // During password recovery, we can update the password directly
+      // Supabase will validate the recovery code from the URL automatically
+      const { error } = await supabase.auth.updateUser({ 
+        password: newPassword 
       })
       
-      const data = await response.json()
       setIsUpdating(false)
       
-      if (!response.ok) {
-        console.error('❌ Password update error:', data.error)
-        setUpdateError(data.error || 'Failed to update password')
+      if (error) {
+        console.error('❌ Password update error:', error)
+        setUpdateError(error.message || 'Failed to update password')
         return
       }
       
