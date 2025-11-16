@@ -86,15 +86,57 @@ function ResetPasswordContent() {
       subscription.unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-        let codeFromQuery = queryParams.get('code')
-        let codeFromHash = hashParams?.get('code')
-        let tokenFromQuery = queryParams.get('token')
-        let accessToken = hashParams?.get('access_token')
-        let refreshToken = hashParams?.get('refresh_token')
-        let type = hashParams?.get('type') || queryParams.get('type')
-        
-        // CRITICAL: If we have a token parameter, this means the user clicked the verify URL directly
+  }, [searchParams])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setUpdateError('')
+    setUpdateSuccess('')
+    
+    if (!newPassword || newPassword.length < 8) {
+      setUpdateError('Password must be at least 8 characters')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setUpdateError('Passwords do not match')
+      return
+    }
+    
+    const supabase = createClient()
+    if (!supabase) {
+      setUpdateError('Auth backend unavailable')
+      return
+    }
+    
+    setIsUpdating(true)
+    
+    try {
+      // Official Supabase approach: update password after PASSWORD_RECOVERY event
+      const { data, error } = await supabase.auth.updateUser({ 
+        password: newPassword 
+      })
+      
+      if (error) {
+        console.error('❌ Password update error:', error)
+        setUpdateError(error.message || 'Failed to update password')
+        setIsUpdating(false)
+        return
+      }
+      
+      console.log('✅ Password updated successfully')
+      setUpdateSuccess('Password updated successfully! Redirecting to sign in...')
+      
+      // Sign out and redirect to login
+      await supabase.auth.signOut()
+      setTimeout(() => router.push('/auth'), 1500)
+    } catch (err: any) {
+      console.error('❌ Password update exception:', err)
+      setUpdateError('An error occurred updating your password. Please try again.')
+      setIsUpdating(false)
+    }
+  }
+
+  return (
         // and Supabase didn't redirect properly (likely because redirect URL isn't whitelisted)
         if (tokenFromQuery && type === 'recovery') {
           console.error('❌ CRITICAL: Token parameter found in URL - redirect URL is NOT whitelisted in Supabase!')
