@@ -97,16 +97,53 @@ function ResetPasswordContent() {
     }
     
     setIsUpdating(true)
+    console.log('🔄 Starting password update...')
     
     try {
-      // Official Supabase approach: update password after PASSWORD_RECOVERY event
-      const { data, error } = await supabase.auth.updateUser({ 
+      // First, try to exchange the code if we have one (needed for recovery flow)
+      const code = searchParams.get('code')
+      if (code) {
+        console.log('🔄 Exchanging code for session first...')
+        try {
+          const { data: exchangeData, error: exchangeError } = await Promise.race([
+            supabase.auth.exchangeCodeForSession(code),
+            new Promise<{ data: null; error: { message: string } }>((resolve) => {
+              setTimeout(() => {
+                resolve({ data: null, error: { message: 'Code exchange timed out' } })
+              }, 5000)
+            })
+          ])
+          
+          if (exchangeError) {
+            console.warn('⚠️ Code exchange failed (non-fatal):', exchangeError.message)
+            // Continue anyway - updateUser might work without it
+          } else if (exchangeData?.session) {
+            console.log('✅ Code exchanged, session created')
+          }
+        } catch (err) {
+          console.warn('⚠️ Code exchange exception (non-fatal):', err)
+          // Continue anyway
+        }
+      }
+      
+      console.log('🔄 Calling updateUser() with 10 second timeout...')
+      
+      // Update password with timeout
+      const updatePromise = supabase.auth.updateUser({ 
         password: newPassword 
       })
       
-      if (error) {
-        console.error('❌ Password update error:', error)
-        setUpdateError(error.message || 'Failed to update password')
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
+        setTimeout(() => {
+          resolve({ data: null, error: { message: 'Password update timed out. Please check your network connection and try again.' } })
+        }, 10000)
+      })
+      
+      const result = await Promise.race([updatePromise, timeoutPromise])
+      
+      if (result.error) {
+        console.error('❌ Password update error:', result.error)
+        setUpdateError(result.error.message || 'Failed to update password')
         setIsUpdating(false)
         return
       }
