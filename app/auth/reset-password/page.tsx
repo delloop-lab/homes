@@ -217,8 +217,18 @@ function ResetPasswordContent() {
     </div>
   )
 }
-          console.error('❌ CRITICAL: Token parameter found in URL - redirect URL is NOT whitelisted in Supabase!')
-          console.error('Token:', tokenFromQuery.substring(0, 20) + '...')
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    }>
+      <ResetPasswordContent />
+    </Suspense>
+  )
+}
           console.error('This means Supabase verify endpoint did not redirect properly.')
           clearTimeout(timeoutId)
           setValidationError(
