@@ -387,6 +387,9 @@ function ResetPasswordContent() {
     e.preventDefault()
     setUpdateError('')
     setUpdateSuccess('')
+    
+    console.log('🔐 Password reset form submitted')
+    
     if (!newPassword || newPassword.length < 8) {
       setUpdateError('Password must be at least 8 characters')
       return
@@ -395,20 +398,43 @@ function ResetPasswordContent() {
       setUpdateError('Passwords do not match')
       return
     }
+    
     const supabase = createClient()
     if (!supabase) {
       setUpdateError('Auth backend unavailable')
       return
     }
+    
     setIsUpdating(true)
-    const { error } = await supabase.auth.updateUser({ password: newPassword })
-    setIsUpdating(false)
-    if (error) {
-      setUpdateError(error.message || 'Failed to set new password')
-      return
+    console.log('🔄 Calling supabase.auth.updateUser() with 10 second timeout...')
+    
+    try {
+      // Add timeout to prevent hanging
+      const updatePromise = supabase.auth.updateUser({ password: newPassword })
+      const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) => {
+        setTimeout(() => {
+          console.error('⏱️ Password update timed out')
+          resolve({ error: { message: 'Password update timed out. Please try again.' } })
+        }, 10000)
+      })
+      
+      const result = await Promise.race([updatePromise, timeoutPromise])
+      setIsUpdating(false)
+      
+      if (result.error) {
+        console.error('❌ Password update error:', result.error)
+        setUpdateError(result.error.message || 'Failed to set new password')
+        return
+      }
+      
+      console.log('✅ Password updated successfully')
+      setUpdateSuccess('Password updated. Redirecting to sign in...')
+      setTimeout(() => router.push('/auth'), 1500)
+    } catch (err: any) {
+      setIsUpdating(false)
+      console.error('❌ Password update exception:', err)
+      setUpdateError(err?.message || 'An error occurred updating your password')
     }
-    setUpdateSuccess('Password updated. Redirecting to sign in...')
-    setTimeout(() => router.push('/auth'), 1500)
   }
 
   return (
