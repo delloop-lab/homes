@@ -184,7 +184,11 @@ function ResetPasswordContent() {
           console.log('Full code:', codeFromQuery)
           try {
             console.log('🔄 Starting code exchange...')
+            console.log('🔄 Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL)
+            console.log('🔄 Has Supabase client:', !!supabase)
+            console.log('🔄 Code to exchange:', codeFromQuery)
             console.log('🔄 Calling supabase.auth.exchangeCodeForSession...')
+            console.log('⚠️ CHECK NETWORK TAB: Look for POST request to /auth/v1/token')
             
             // Add a timeout wrapper to prevent hanging
             const exchangePromise = supabase.auth.exchangeCodeForSession(codeFromQuery)
