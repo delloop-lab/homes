@@ -21,10 +21,14 @@ export function ForgotPasswordForm({ onBack }: ForgotPasswordFormProps) {
     setError('')
     setIsLoading(true)
 
+    console.log('[Forgot Password Form] Submitting password reset request for:', email)
+
     try {
       await resetPassword(email)
+      console.log('[Forgot Password Form] Password reset request successful')
       setSuccess(true)
     } catch (err: any) {
+      console.error('[Forgot Password Form] Password reset error:', err)
       setError(err.message || 'Failed to send reset email')
     } finally {
       setIsLoading(false)
