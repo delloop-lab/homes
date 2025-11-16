@@ -127,16 +127,40 @@ function ResetPasswordContent() {
         }
 
         // First, check if we already have a valid session (Supabase may have created one)
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        console.log('🔍 Checking for existing session...')
+        let session, sessionError
+        try {
+          // Add timeout to session check to prevent hanging
+          const sessionPromise = supabase.auth.getSession()
+          const sessionTimeout = new Promise<{ data: { session: null }; error: { message: string } }>((resolve) => {
+            setTimeout(() => {
+              console.warn('⏱️ Session check timed out after 3 seconds, continuing...')
+              resolve({ data: { session: null }, error: { message: 'Session check timed out' } })
+            }, 3000)
+          })
+          
+          const sessionResult = await Promise.race([sessionPromise, sessionTimeout])
+          session = sessionResult.data?.session
+          sessionError = sessionResult.error
+          console.log('🔍 Session check result:', {
+            hasSession: !!session,
+            hasError: !!sessionError,
+            errorMessage: sessionError?.message || null
+          })
+        } catch (err: any) {
+          console.error('❌ Session check exception:', err)
+          sessionError = err
+        }
         
         if (session && !sessionError) {
-          console.log('Session already exists, validation successful')
+          console.log('✅ Session already exists, validation successful')
           clearTimeout(timeoutId)
           setIsValidating(false)
           return
         }
 
         // Try PKCE code from query params first
+        console.log('🔍 Checking codeFromQuery:', !!codeFromQuery)
         if (codeFromQuery) {
           console.log('✅ Code found in query params, attempting PKCE exchange...')
           console.log('Code (first 20 chars):', codeFromQuery.substring(0, 20) + '...')
