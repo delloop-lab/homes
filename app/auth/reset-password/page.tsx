@@ -137,8 +137,86 @@ function ResetPasswordContent() {
   }
 
   return (
-        // and Supabase didn't redirect properly (likely because redirect URL isn't whitelisted)
-        if (tokenFromQuery && type === 'recovery') {
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-md bg-white rounded-lg shadow border border-gray-200 p-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-6">Reset Password</h1>
+
+        {isValidating && (
+          <div className="flex items-center text-gray-600">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+            Validating reset link...
+          </div>
+        )}
+
+        {!isValidating && validationError && (
+          <div className="p-4 mb-4 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+            {validationError}
+            <div className="mt-3">
+              <button
+                onClick={() => router.push('/auth')}
+                className="text-blue-600 hover:text-blue-800 underline"
+              >
+                Return to login
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isValidating && !validationError && (
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">New password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Confirm new password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            {updateError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                {updateError}
+              </div>
+            )}
+
+            {updateSuccess && (
+              <div className="p-3 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                {updateSuccess}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isUpdating}
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            >
+              {isUpdating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Updating...
+                </>
+              ) : (
+                'Reset Password'
+              )}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
           console.error('❌ CRITICAL: Token parameter found in URL - redirect URL is NOT whitelisted in Supabase!')
           console.error('Token:', tokenFromQuery.substring(0, 20) + '...')
           console.error('This means Supabase verify endpoint did not redirect properly.')
