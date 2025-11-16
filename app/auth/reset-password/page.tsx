@@ -50,31 +50,33 @@ function ResetPasswordContent() {
     
     if (code) {
       console.log('✅ Recovery code found, exchanging...')
-      try {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-        
-        if (error) {
-          console.error('❌ Code exchange error:', error.message)
+      ;(async () => {
+        try {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          
+          if (error) {
+            console.error('❌ Code exchange error:', error.message)
+            if (mounted) {
+              setValidationError(error.message || 'Invalid reset code')
+              setIsValidating(false)
+            }
+            return
+          }
+          
+          if (data?.session) {
+            console.log('✅ Code exchanged, session created')
+            if (mounted) {
+              setIsValidating(false)
+            }
+          }
+        } catch (err: any) {
+          console.error('❌ Code exchange exception:', err)
           if (mounted) {
-            setValidationError(error.message || 'Invalid reset code')
+            setValidationError('Failed to validate reset code')
             setIsValidating(false)
           }
-          return
         }
-        
-        if (data?.session) {
-          console.log('✅ Code exchanged, session created')
-          if (mounted) {
-            setIsValidating(false)
-          }
-        }
-      } catch (err: any) {
-        console.error('❌ Code exchange exception:', err)
-        if (mounted) {
-          setValidationError('Failed to validate reset code')
-          setIsValidating(false)
-        }
-      }
+      })()
     } else {
       // No code - wait for PASSWORD_RECOVERY event (handled by onAuthStateChange above)
       console.log('⏳ No code in URL, waiting for auth state change...')
