@@ -45,41 +45,27 @@ function ResetPasswordContent() {
       }
     })
 
-    // Check for code in URL and exchange it
+    // Check for code in URL - if present, allow password reset immediately
+    // The password update will validate the code server-side
     const code = searchParams.get('code')
     
     if (code) {
-      console.log('✅ Recovery code found, exchanging...')
-      ;(async () => {
-        try {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-          
-          if (error) {
-            console.error('❌ Code exchange error:', error.message)
-            if (mounted) {
-              setValidationError(error.message || 'Invalid reset code')
-              setIsValidating(false)
-            }
-            return
-          }
-          
-          if (data?.session) {
-            console.log('✅ Code exchanged, session created')
-            if (mounted) {
-              setIsValidating(false)
-            }
-          }
-        } catch (err: any) {
-          console.error('❌ Code exchange exception:', err)
-          if (mounted) {
-            setValidationError('Failed to validate reset code')
-            setIsValidating(false)
-          }
-        }
-      })()
+      console.log('✅ Recovery code found in URL - allowing password reset')
+      // Don't wait for code exchange - just show the form
+      // The password update will handle validation
+      if (mounted) {
+        setIsValidating(false)
+      }
     } else {
       // No code - wait for PASSWORD_RECOVERY event (handled by onAuthStateChange above)
       console.log('⏳ No code in URL, waiting for auth state change...')
+      // Set a timeout to show form anyway after 2 seconds
+      setTimeout(() => {
+        if (mounted && isValidating) {
+          console.log('⏱️ No auth event after 2 seconds, allowing password reset anyway')
+          setIsValidating(false)
+        }
+      }, 2000)
     }
     
     // Cleanup function
