@@ -399,41 +399,44 @@ function ResetPasswordContent() {
       return
     }
     
-    const supabase = createClient()
-    if (!supabase) {
-      setUpdateError('Auth backend unavailable')
+    // Get the code from URL
+    const code = searchParams.get('code')
+    if (!code) {
+      setUpdateError('Reset code missing. Please request a new password reset link.')
       return
     }
     
     setIsUpdating(true)
-    console.log('🔄 Calling supabase.auth.updateUser() with 10 second timeout...')
+    console.log('🔄 Calling password reset API...')
     
     try {
-      // Add timeout to prevent hanging
-      const updatePromise = supabase.auth.updateUser({ password: newPassword })
-      const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) => {
-        setTimeout(() => {
-          console.error('⏱️ Password update timed out')
-          resolve({ error: { message: 'Password update timed out. Please try again.' } })
-        }, 10000)
+      const response = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: code,
+          password: newPassword
+        })
       })
       
-      const result = await Promise.race([updatePromise, timeoutPromise])
+      const data = await response.json()
       setIsUpdating(false)
       
-      if (result.error) {
-        console.error('❌ Password update error:', result.error)
-        setUpdateError(result.error.message || 'Failed to set new password')
+      if (!response.ok) {
+        console.error('❌ Password update error:', data.error)
+        setUpdateError(data.error || 'Failed to update password')
         return
       }
       
       console.log('✅ Password updated successfully')
-      setUpdateSuccess('Password updated. Redirecting to sign in...')
+      setUpdateSuccess('Password updated successfully! Redirecting to sign in...')
       setTimeout(() => router.push('/auth'), 1500)
     } catch (err: any) {
       setIsUpdating(false)
       console.error('❌ Password update exception:', err)
-      setUpdateError(err?.message || 'An error occurred updating your password')
+      setUpdateError('An error occurred updating your password. Please try again.')
     }
   }
 
