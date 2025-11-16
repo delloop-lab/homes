@@ -18,19 +18,35 @@ function ResetPasswordContent() {
 
   useEffect(() => {
     let mounted = true
-    let timeoutCleared = false
+    const supabase = createClient()
+    
+    if (!supabase) {
+      setValidationError('Auth backend unavailable')
+      setIsValidating(false)
+      return
+    }
 
-    const validateResetLink = async () => {
-      const supabase = createClient()
-      if (!supabase) {
+    // Official Supabase approach: Listen for PASSWORD_RECOVERY event
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('🔔 Auth state change:', event, session ? 'has session' : 'no session')
+      
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log('✅ PASSWORD_RECOVERY event detected - allowing password reset')
         if (mounted) {
-          setValidationError('Auth backend unavailable')
           setIsValidating(false)
         }
-        return
+      } else if (event === 'SIGNED_IN' && session) {
+        console.log('✅ User signed in - allowing password reset')
+        if (mounted) {
+          setIsValidating(false)
+        }
       }
-      
-      // Prevent duplicate execution
+    })
+
+    // Also check for code in URL and exchange it
+    const validateResetLink = async () => {
       if (!mounted) return
 
       // Helper to parse hash params
@@ -176,50 +192,35 @@ function ResetPasswordContent() {
           return
         }
 
-        // Try PKCE code from query params first
-        console.log('🔍 Checking codeFromQuery:', !!codeFromQuery)
+        // Try PKCE code from query params - exchange it properly
         if (codeFromQuery) {
-          console.log('✅ Code found in query params')
-          console.log('Code (first 20 chars):', codeFromQuery.substring(0, 20) + '...')
+          console.log('✅ Code found in query params, exchanging...')
           
           try {
-            console.log('🔄 Attempting code exchange (5 second timeout)...')
+            const { data, error } = await supabase.auth.exchangeCodeForSession(codeFromQuery)
             
-            // Shorter timeout - if it doesn't work in 5 seconds, skip it
-            const exchangePromise = supabase.auth.exchangeCodeForSession(codeFromQuery)
-            const timeoutPromise = new Promise<{ data: null; error: null }>((resolve) => {
-              setTimeout(() => {
-                console.warn('⏱️ Code exchange timed out - allowing password reset anyway')
-                resolve({ data: null, error: null })
-              }, 5000) // 5 second timeout
-            })
-            
-            const result = await Promise.race([exchangePromise, timeoutPromise])
-            clearTimeoutSafe()
-            
-            if (!mounted) return
-            
-            if (result.error) {
-              console.warn('⚠️ Code exchange error (non-fatal):', result.error.message)
-              // Don't fail - just allow password reset
-            } else if (result.data) {
-              console.log('✅ Code exchange successful!')
-            } else {
-              console.warn('⏱️ Code exchange timed out - continuing anyway')
+            if (error) {
+              console.error('❌ Code exchange error:', error.message)
+              if (mounted) {
+                setValidationError(error.message || 'Invalid or expired reset code')
+                setIsValidating(false)
+              }
+              return
             }
             
-            // Regardless of exchange success/failure, if we have a code, allow password reset
-            console.log('✅ Valid recovery code detected - allowing password reset')
-            setIsValidating(false)
-            return
-            
+            if (data?.session) {
+              console.log('✅ Code exchanged successfully, session created')
+              if (mounted) {
+                setIsValidating(false)
+              }
+              return
+            }
           } catch (err: any) {
-            clearTimeoutSafe()
-            if (!mounted) return
-            console.warn('⚠️ Code exchange exception (non-fatal):', err?.message)
-            // Don't fail - just allow password reset if we have a code
-            console.log('✅ Recovery code present - allowing password reset despite exchange error')
-            setIsValidating(false)
+            console.error('❌ Code exchange exception:', err)
+            if (mounted) {
+              setValidationError('Failed to validate reset code. Please request a new password reset.')
+              setIsValidating(false)
+            }
             return
           }
         }
@@ -378,7 +379,7 @@ function ResetPasswordContent() {
     // Cleanup function
     return () => {
       mounted = false
-      timeoutCleared = true
+      subscription.unsubscribe()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -387,8 +388,6 @@ function ResetPasswordContent() {
     e.preventDefault()
     setUpdateError('')
     setUpdateSuccess('')
-    
-    console.log('🔐 Password reset form submitted')
     
     if (!newPassword || newPassword.length < 8) {
       setUpdateError('Password must be at least 8 characters')
@@ -406,30 +405,30 @@ function ResetPasswordContent() {
     }
     
     setIsUpdating(true)
-    console.log('🔄 Updating password directly (no session required for recovery)...')
     
     try {
-      // During password recovery, we can update the password directly
-      // Supabase will validate the recovery code from the URL automatically
-      const { error } = await supabase.auth.updateUser({ 
+      // Official Supabase approach: update password after PASSWORD_RECOVERY event
+      const { data, error } = await supabase.auth.updateUser({ 
         password: newPassword 
       })
-      
-      setIsUpdating(false)
       
       if (error) {
         console.error('❌ Password update error:', error)
         setUpdateError(error.message || 'Failed to update password')
+        setIsUpdating(false)
         return
       }
       
       console.log('✅ Password updated successfully')
       setUpdateSuccess('Password updated successfully! Redirecting to sign in...')
+      
+      // Sign out and redirect to login
+      await supabase.auth.signOut()
       setTimeout(() => router.push('/auth'), 1500)
     } catch (err: any) {
-      setIsUpdating(false)
       console.error('❌ Password update exception:', err)
       setUpdateError('An error occurred updating your password. Please try again.')
+      setIsUpdating(false)
     }
   }
 
