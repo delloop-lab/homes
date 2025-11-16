@@ -127,21 +127,46 @@ export class AuthService {
     console.log('📍 Supabase client type:', typeof this.supabase)
     console.log('📍 Supabase client keys:', Object.keys(this.supabase || {}))
 
+    // IMPORTANT: Verify the redirect URL is whitelisted
+    // If not whitelisted, Supabase may return success but not send the email
+    console.log('⚠️ IMPORTANT: Make sure this redirect URL is whitelisted in Supabase Dashboard:')
+    console.log('⚠️   Authentication → URL Configuration → Redirect URLs')
+    console.log('⚠️   URL:', redirectUrl)
+
     console.log('📤 Calling Supabase resetPasswordForEmail...')
-    const { data, error } = await this.supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectUrl
-    })
+    console.log('📤 Email:', email)
+    console.log('📤 Redirect URL:', redirectUrl)
+    
+    try {
+      const { data, error } = await this.supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectUrl,
+        // emailRedirectTo is the same as redirectTo for password reset
+        // Both should point to the same URL
+      })
 
-    if (error) {
-      console.error('❌ SUPABASE ERROR:', error)
-      console.error('❌ Error code:', error.status)
-      console.error('❌ Error message:', error.message)
-      throw error
+      if (error) {
+        console.error('❌ SUPABASE ERROR:', error)
+        console.error('❌ Error code:', error.status)
+        console.error('❌ Error message:', error.message)
+        console.error('❌ Error details:', JSON.stringify(error, null, 2))
+        throw error
+      }
+
+      // Supabase returns success even if email isn't sent (if redirect URL not whitelisted)
+      // The email will only be sent if:
+      // 1. The redirect URL is whitelisted in Supabase Dashboard
+      // 2. The email address exists in the system
+      // 3. SMTP is properly configured
+      console.log('✅✅✅ API CALL SUCCESSFUL!')
+      console.log('✅ Response data:', data)
+      console.log('⚠️ NOTE: This does NOT guarantee the email was sent.')
+      console.log('⚠️ Check Supabase Auth Logs to verify email delivery.')
+      console.log('⚠️ If email not received, verify redirect URL is whitelisted.')
+      console.log('========================================')
+    } catch (err: any) {
+      console.error('❌ EXCEPTION in resetPassword:', err)
+      throw err
     }
-
-    console.log('✅✅✅ SUCCESS! Email sent by Supabase!')
-    console.log('✅ Response data:', data)
-    console.log('========================================')
   }
 
   async updatePassword(newPassword: string) {
