@@ -140,28 +140,61 @@ function ResetPasswordContent() {
         if (codeFromQuery) {
           console.log('✅ Code found in query params, attempting PKCE exchange...')
           console.log('Code (first 20 chars):', codeFromQuery.substring(0, 20) + '...')
+          console.log('Full code:', codeFromQuery)
           try {
+            console.log('🔄 Starting code exchange...')
+            console.log('🔄 Calling supabase.auth.exchangeCodeForSession...')
+            
             // Add a timeout wrapper to prevent hanging
             const exchangePromise = supabase.auth.exchangeCodeForSession(codeFromQuery)
-            const timeoutPromise = new Promise<{ error: { message: string } }>((resolve) => {
+              .then((result) => {
+                console.log('📥 Exchange promise resolved:', {
+                  hasData: !!result.data,
+                  hasError: !!result.error,
+                  dataKeys: result.data ? Object.keys(result.data) : null,
+                  errorMessage: result.error?.message || null
+                })
+                return result
+              })
+              .catch((err) => {
+                console.error('❌ Exchange promise rejected:', err)
+                throw err
+              })
+            
+            const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
               setTimeout(() => {
                 console.error('⏱️ Code exchange timed out after 10 seconds')
-                resolve({ error: { message: 'Code exchange timed out. Please try requesting a new password reset.' } })
+                resolve({ 
+                  data: null,
+                  error: { message: 'Code exchange timed out. Please try requesting a new password reset.' } 
+                })
               }, 10000) // 10 second timeout for the exchange
             })
             
-            console.log('🔄 Starting code exchange...')
+            console.log('🔄 Racing exchange promise against timeout...')
             const result = await Promise.race([exchangePromise, timeoutPromise])
+            console.log('🏁 Race completed, result:', {
+              hasData: !!result.data,
+              hasError: !!result.error,
+              resultType: typeof result
+            })
             clearTimeout(timeoutId)
             
-            if ('error' in result && result.error) {
+            if (result.error) {
               console.error('❌ PKCE exchange error:', result.error)
               console.error('Error details:', JSON.stringify(result.error, null, 2))
               setValidationError(result.error.message || 'Failed to validate recovery code')
               setIsValidating(false)
-            } else if ('data' in result) {
+              return
+            }
+            
+            if (result.data) {
               console.log('✅ PKCE exchange successful!')
-              console.log('Exchange result:', result.data ? 'Has data' : 'No data')
+              console.log('Exchange result data:', {
+                hasSession: !!result.data.session,
+                hasUser: !!result.data.user,
+                sessionKeys: result.data.session ? Object.keys(result.data.session) : null
+              })
               
               // Check if we got a session
               const { data: { session }, error: sessionError } = await supabase.auth.getSession()
@@ -181,15 +214,18 @@ function ResetPasswordContent() {
                 setIsValidating(false)
                 return
               }
-            } else {
-              console.error('❌ Unexpected exchange result format:', result)
-              setValidationError('Unexpected response from authentication server')
-              setIsValidating(false)
             }
+            
+            // If we get here, something unexpected happened
+            console.error('❌ Unexpected exchange result format:', result)
+            console.error('Result keys:', Object.keys(result))
+            setValidationError('Unexpected response from authentication server')
+            setIsValidating(false)
           } catch (err: any) {
             clearTimeout(timeoutId)
             console.error('❌ PKCE exchange exception:', err)
             console.error('Exception details:', err?.stack || err)
+            console.error('Exception message:', err?.message)
             setValidationError(err?.message || 'An error occurred during code exchange')
             setIsValidating(false)
           }
@@ -455,6 +491,18 @@ function ResetPasswordContent() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin h-8 w-8 text-blue-600" />
+      </div>
+    }>
+      <ResetPasswordContent />
+    </Suspense>
   )
 }
 
